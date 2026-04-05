@@ -4,10 +4,14 @@ from app.config import get_settings
 
 settings = get_settings()
 
-# Railway provides 'postgres://' but SQLAlchemy requires 'postgresql://'
 database_url = settings.DATABASE_URL
+print(f"RAW DATABASE_URL: '{database_url}'")
+print(f"URL starts with: '{database_url[:20]}'")
+
 if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+print(f"FINAL DATABASE_URL: '{database_url[:30]}'")
 
 engine = create_engine(database_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
