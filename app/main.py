@@ -14,6 +14,8 @@ app = FastAPI(
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://viciniti.vercel.app",
+    "https://www.viciniti.com",
 ]
 
 app.add_middleware(
