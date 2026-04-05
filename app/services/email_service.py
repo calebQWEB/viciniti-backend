@@ -45,7 +45,7 @@ def send_welcome_email(to: str, name: str):
                     <li>Offer a service to your community</li>
                 </ul>
             </div>
-            <a href="http://localhost:3000" 
+            <a href="https://viciniti-frontend.vercel.app" 
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin-top: 8px;">
                 Explore Viciniti
             </a>
@@ -58,7 +58,7 @@ def send_welcome_email(to: str, name: str):
 
 
 def send_password_reset_email(to: str, name: str, reset_token: str):
-    reset_link = f"http://localhost:3000/reset-password?token={reset_token}"
+    reset_link = f"https://viciniti-frontend.vercel.app/reset-password?token={reset_token}"
     send_email(
         to=to,
         subject="Reset your Viciniti password",
@@ -100,7 +100,7 @@ def send_new_message_email(to: str, name: str, sender_name: str):
             <p style="color: #555; line-height: 1.6;">
                 <strong>{sender_name}</strong> sent you a message on Viciniti.
             </p>
-            <a href="http://localhost:3000/dashboard/messages"
+            <a href="https://viciniti-frontend.vercel.app/dashboard/messages"
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 View Message
             </a>
@@ -125,7 +125,7 @@ def send_notification_email(to: str, name: str, notification_message: str):
             <div style="background: #f9f9f9; border-radius: 12px; padding: 20px; margin: 16px 0; border-left: 4px solid #2D6A4F;">
                 <p style="color: #333; margin: 0; line-height: 1.6;">{notification_message}</p>
             </div>
-            <a href="http://localhost:3000/dashboard/notifications"
+            <a href="https://viciniti-frontend.vercel.app/dashboard/notifications"
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 View Notifications
             </a>
@@ -154,7 +154,7 @@ def send_booking_confirmed_email(to: str, name: str, service_title: str, schedul
                 <p style="color: #333; font-weight: 700; margin: 0 0 8px;">Scheduled for:</p>
                 <p style="color: #2D6A4F; font-size: 18px; font-weight: 900; margin: 0;">{scheduled_at}</p>
             </div>
-            <a href="http://localhost:3000/dashboard/bookings"
+            <a href="https://viciniti-frontend.vercel.app/dashboard/bookings"
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 View My Bookings
             </a>
@@ -176,7 +176,7 @@ def send_order_completed_email(to: str, name: str, order_id: str):
             <p style="color: #555; line-height: 1.6;">
                 Great news! Your order <strong>#{order_id[:8].upper()}</strong> has been marked as completed by the seller.
             </p>
-            <a href="http://localhost:3000/dashboard/purchases"
+            <a href="https://viciniti-frontend.vercel.app/dashboard/purchases"
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 View My Purchases
             </a>
