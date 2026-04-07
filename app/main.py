@@ -13,6 +13,9 @@ app = FastAPI(
     title="Viciniti API",
     description="Backend API for Viciniti - Local Community Marketplace",
     version="1.0.0"
+    servers=[
+        {"url": "https://viciniti-backend-production.up.railway.app"},
+    ]
 )
 
 # Allowed CORS origins
