@@ -1,9 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, HTTPBearer
+
 from app.database import engine
 from app.models import User
-from app.routers import auth, users, listings, services, bookings, orders, messages, notifications, transactions, upload
+from app.routers import (
+    auth, users, listings, services, bookings,
+    orders, messages, notifications, transactions, upload
+)
 
 app = FastAPI(
     title="Viciniti API",
@@ -11,6 +15,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Allowed CORS origins
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -22,20 +27,20 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
 
+# Auth schemes
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 security = HTTPBearer()
 
 @app.on_event("startup")
-def startup():
+async def startup():
     from app.database import Base
     Base.metadata.create_all(bind=engine)
 
-# Routes
+# Routers
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(listings.router)
@@ -46,7 +51,6 @@ app.include_router(messages.router)
 app.include_router(notifications.router)
 app.include_router(transactions.router)
 app.include_router(upload.router)
-
 
 @app.get("/")
 def root():
