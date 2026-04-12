@@ -49,24 +49,22 @@ async def initiate(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Get user email
     user = db.query(User).filter(User.id == current_user["sub"]).first()
 
-    # Initiate payment with Flutterwave
     result = await initiate_payment(
         amount=payment_data.amount,
         email=user.email,
         order_id=payment_data.order_id
     )
 
-    # Create a pending transaction
     fee = round(payment_data.amount * 0.05, 2)
     create_transaction(db, TransactionCreate(
         user_id=user.id,
         reference=result["reference"],
         amount=payment_data.amount,
         fee=fee,
-        type=TransactionType.payment
+        type=TransactionType.payment,
+        order_id=payment_data.order_id,
     ))
 
     return result
@@ -81,13 +79,33 @@ async def verify(
     is_verified = await verify_payment(verify_data.reference)
 
     if is_verified:
-        # Update transaction status to success
         transaction = update_transaction_status(
             db,
             verify_data.reference,
             TransactionStatus.success
         )
-        # Notify user
+
+        # Use order_id from transaction to mark listing as sold
+        if transaction.order_id:
+            from app.models.order import Order, OrderStatus
+            from app.models.listing import Listing, ListingStatus
+
+            order = db.query(Order).filter(
+                Order.id == transaction.order_id
+            ).first()
+
+            if order:
+                # Mark listing as sold
+                listing = db.query(Listing).filter(
+                    Listing.id == order.listing_id
+                ).first()
+                if listing:
+                    listing.status = ListingStatus.sold
+
+                # Mark order as completed
+                order.status = OrderStatus.completed
+                db.commit()
+
         create_notification(
             db,
             transaction.user_id,
@@ -95,7 +113,6 @@ async def verify(
         )
         return {"status": "success", "message": "Payment verified successfully"}
     else:
-        # Update transaction status to failed
         update_transaction_status(
             db,
             verify_data.reference,

@@ -20,6 +20,7 @@ class Transaction(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    order_id = Column(UUID(as_uuid=True), nullable=True)  # ← links to order or booking
     reference = Column(String, unique=True, nullable=False)
     amount = Column(Float, nullable=False)
     fee = Column(Float, nullable=False)
@@ -27,5 +28,4 @@ class Transaction(Base):
     status = Column(Enum(TransactionStatus), default=TransactionStatus.pending)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Relationship
     user = relationship("User", backref="transactions")

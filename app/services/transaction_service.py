@@ -16,6 +16,7 @@ def create_transaction(db: Session, transaction_data: TransactionCreate):
         amount=transaction_data.amount,
         fee=transaction_data.fee,
         type=transaction_data.type,
+        order_id=transaction_data.order_id
     )
     db.add(new_transaction)
     db.commit()

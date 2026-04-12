@@ -46,9 +46,6 @@ def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
         fee=fee,
     )
 
-    # Mark listing as sold
-    listing.status = ListingStatus.sold
-
     db.add(new_order)
     db.commit()
     db.refresh(new_order)

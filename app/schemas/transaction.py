@@ -12,6 +12,7 @@ class TransactionBase(BaseModel):
 class TransactionCreate(TransactionBase):
     user_id: UUID
     reference: str
+    order_id: Optional[UUID] = None
 
 class TransactionUpdate(BaseModel):
     status: Optional[TransactionStatus] = None
