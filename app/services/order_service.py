@@ -50,13 +50,6 @@ def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
     db.commit()
     db.refresh(new_order)
 
-    # Notify seller
-    create_notification(
-        db,
-        new_order.seller_id,
-        f"You have a new order for your listing!"
-    )
-
     return new_order
 
 def get_buyer_orders(db: Session, buyer_id: UUID):
@@ -119,5 +112,29 @@ def update_order(db: Session, order_id: UUID, order_data: OrderUpdate, user_id: 
                 buyer.id,
                 f"Your order #{str(order.id)[:8].upper()} has been completed!"
             )
+
+    return order
+
+def cancel_order(db: Session, order_id: UUID, user_id: UUID):
+    """Cancel a pending order. Only the buyer can cancel their own orders."""
+    order = get_order(db, order_id)
+
+    # Only buyer can cancel their own order
+    if order.buyer_id != UUID(str(user_id)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only cancel your own orders"
+        )
+
+    # Can only cancel pending orders
+    if order.status != OrderStatus.pending:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel {order.status.value} order"
+        )
+
+    order.status = OrderStatus.cancelled
+    db.commit()
+    db.refresh(order)
 
     return order

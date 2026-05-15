@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # Flutterwave
     FLUTTERWAVE_PUBLIC_KEY: str
     FLUTTERWAVE_SECRET_KEY: str
+    FLUTTERWAVE_HASH_KEY: str  # Used for webhook signature verification
 
     # Google OAuth
     GOOGLE_CLIENT_ID: str

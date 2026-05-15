@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Float, DateTime, Enum, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, Float, DateTime, Enum, ForeignKey, String, Boolean
+from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
 from datetime import datetime
@@ -10,6 +10,7 @@ class OrderStatus(enum.Enum):
     pending = "pending"
     completed = "completed"
     cancelled = "cancelled"
+    disputed = "disputed"  # Chargeback filed
 
 class Order(Base):
     __tablename__ = "orders"
@@ -22,6 +23,12 @@ class Order(Base):
     fee = Column(Float, nullable=False)
     status = Column(Enum(OrderStatus), default=OrderStatus.pending)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Completion proof fields
+    completion_photos = Column(JSON, default=[])  # List of photo URLs
+    completion_notes = Column(String, nullable=True)  # Seller's description of work done
+    completed_at = Column(DateTime, nullable=True)  # When seller marked complete
+    buyer_accepted_at = Column(DateTime, nullable=True)  # When buyer confirmed completion
 
     # Relationships
     listing = relationship("Listing", backref="orders")
