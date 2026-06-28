@@ -13,6 +13,7 @@ from app.models.notification import Notification
 from app.models.user import User
 from app.schemas.transaction import TransactionCreate
 from app.utils.security import get_current_user
+from app.config import PLATFORM_FEE_PERCENTAGE
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
@@ -114,7 +115,7 @@ async def initiate(
         order_id=payment_data.order_id
     )
 
-    fee = round(payment_data.amount * 0.05, 2)
+    fee = round(payment_data.amount * PLATFORM_FEE_PERCENTAGE, 2)
     create_transaction(db, TransactionCreate(
         user_id=user.id,
         reference=result["reference"],
@@ -348,17 +349,21 @@ async def flutterwave_webhook(
                 if listing:
                     listing.status = ListingStatus.sold
                 
-                # Mark order as completed
-                order.status = OrderStatus.completed
+                # IMPORTANT: Keep order as "pending"
+                # Order only moves to "completed" after:
+                # 1. Seller marks completion (uploads photos + notes)
+                # 2. Buyer confirms completion (rates and accepts)
+                # This creates a strong legal record for chargeback defense
+                
                 db.commit()
                 
-                print(f"✅ Order {order.id} marked as completed")
+                print(f"✅ Payment confirmed for order {order.id}, awaiting completion proof")
                 
-                # Notify seller that payment was received
+                # Notify seller that payment was received (work can begin)
                 create_notification_deduplicated(
                     db,
                     order.seller_id,
-                    f"Payment received for your listing! New order from buyer.",
+                    f"Payment received! 🎉 Buyer has paid. Complete the work and upload proof.",
                     reference,
                     time_window_seconds=10
                 )

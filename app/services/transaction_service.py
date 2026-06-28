@@ -60,7 +60,8 @@ async def initiate_payment(amount: float, email: str, order_id: str):
         "tx_ref": reference,
         "amount": amount,
         "currency": "NGN",
-        "redirect_url": "https://viciniti-frontend.vercel.app/payment/callback",
+        # "redirect_url": "https://viciniti-frontend.vercel.app/payment/callback",
+        "redirect_url": "http://localhost:3000/payment/callback",
         "customer": {
             "email": email,
         },

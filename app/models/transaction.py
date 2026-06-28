@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, DateTime, Enum, ForeignKey, Boolean
+from sqlalchemy import Column, String, Float, DateTime, Enum, ForeignKey, Boolean, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -35,6 +35,7 @@ class Transaction(Base):
     chargeback_reason = Column(String, nullable=True)  # Reason from bank
     chargeback_filed_at = Column(DateTime, nullable=True)  # When chargeback was filed
     chargeback_evidence_notes = Column(String, nullable=True)  # Your response/evidence notes
+    chargeback_evidence_photos = Column(JSON, default=[])  # List of evidence photo URLs
     chargeback_resolved_at = Column(DateTime, nullable=True)  # When dispute was resolved
     
     # Terms acceptance tracking

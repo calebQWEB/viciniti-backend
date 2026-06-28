@@ -12,6 +12,7 @@ from app.models.transaction import Transaction, TransactionStatus
 from app.models.order import Order, OrderStatus
 from app.models.user import User
 from app.services.notification_service import create_notification
+from app.config import CHARGEBACK_FEE
 
 
 async def handle_chargeback_filed(
@@ -169,7 +170,7 @@ async def handle_chargeback_lost(
             order.seller_id,
             f"❌ CHARGEBACK LOST: The dispute for order {order.id} was resolved against you. "
             f"Payment of ₦{order.amount:,.0f} has been reversed to the buyer. "
-            f"A chargeback fee of ₦2,500 has been deducted from your account."
+            f"A chargeback fee of ₦{CHARGEBACK_FEE:,.0f} has been deducted from your account."
         )
     
     # Notify buyer - they won

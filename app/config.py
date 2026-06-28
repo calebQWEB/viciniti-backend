@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
 
+# Platform fee configuration
+PLATFORM_FEE_PERCENTAGE = 0.05
+CHARGEBACK_FEE = 2500
+
 @lru_cache()
 def get_settings():
     return Settings()

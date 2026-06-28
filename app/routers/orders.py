@@ -95,7 +95,7 @@ async def complete_order(
     success = await mark_order_completion(
         db,
         order_id,
-        current_user["sub"],
+        UUID(current_user["sub"]),  # Convert string from JWT to UUID
         photos=completion_data.photos,
         notes=completion_data.notes
     )
@@ -129,7 +129,7 @@ async def confirm_order_completion(
     success = await buyer_confirm_completion(
         db,
         order_id,
-        current_user["sub"],
+        UUID(current_user["sub"]),  # Convert string from JWT to UUID
         rating=confirmation_data.rating,
         review_text=confirmation_data.review
     )
@@ -175,4 +175,158 @@ def get_completion_evidence(
     return {
         "status": "success",
         "evidence": evidence
+    }
+
+
+# Get dispute details for seller
+@router.get("/{order_id}/dispute")
+def get_dispute_details(
+    order_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get chargeback/dispute details for an order.
+    Only seller can view (they need this to respond).
+    """
+    from app.models.order import Order
+    from app.models.transaction import Transaction
+    
+    order = db.query(Order).filter(Order.id == order_id).first()
+    
+    if not order:
+        return {
+            "status": "error",
+            "message": "Order not found"
+        }
+    
+    # Verify seller ownership
+    if order.seller_id != UUID(current_user["sub"]):
+        return {
+            "status": "error",
+            "message": "Unauthorized - only seller can view dispute"
+        }
+    
+    # Get transaction with chargeback details
+    transaction = db.query(Transaction).filter(
+        Transaction.order_id == order_id
+    ).first()
+    
+    print(f"🔍 Debug: Looking for transaction with order_id={order_id}")
+    print(f"   Found transaction: {transaction}")
+    if transaction:
+        print(f"   Transaction ID: {transaction.id}")
+        print(f"   Transaction status: {transaction.status}")
+        print(f"   Chargeback filed at: {transaction.chargeback_filed_at}")
+    
+    if not transaction:
+        return {
+            "status": "error",
+            "message": "No transaction found for this order"
+        }
+    
+    # If no chargeback filed, return that info
+    if not transaction.chargeback_filed_at:
+        print(f"❌ No chargeback_filed_at value found")
+        return {
+            "status": "success",
+            "dispute": None,
+            "message": "No chargeback filed for this order"
+        }
+    
+    # Get evidence
+    evidence = get_order_completion_evidence(db, order_id)
+    
+    return {
+        "status": "success",
+        "dispute": {
+            "transaction_id": str(transaction.id),
+            "reference": transaction.reference,
+            "amount": transaction.amount,
+            "chargeback_status": transaction.status,
+            "chargeback_reason": transaction.chargeback_reason,
+            "chargeback_filed_at": transaction.chargeback_filed_at.isoformat() if transaction.chargeback_filed_at else None,
+            "chargeback_resolved_at": transaction.chargeback_resolved_at.isoformat() if transaction.chargeback_resolved_at else None,
+            "seller_response": transaction.chargeback_evidence_notes,
+            "evidence_photos": transaction.chargeback_evidence_photos or [],
+            "buyer_name": order.buyer.name if order.buyer else "Unknown",
+            "listing_title": order.listing.title if order.listing else "Order"
+        },
+        "evidence": evidence
+    }
+
+
+# Add/update chargeback response
+class ChargebackResponseRequest(BaseModel):
+    response_notes: str  # Seller's defense/response
+    evidence_photos: Optional[List[str]] = []  # Optional photo URLs
+
+
+@router.post("/{order_id}/chargeback-response")
+def add_chargeback_response(
+    order_id: UUID,
+    response_data: ChargebackResponseRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Seller submits additional evidence/response to chargeback.
+    This response is sent to the bank as part of the dispute.
+    """
+    from app.models.order import Order
+    from app.models.transaction import Transaction
+    
+    order = db.query(Order).filter(Order.id == order_id).first()
+    
+    if not order:
+        return {
+            "status": "error",
+            "message": "Order not found"
+        }
+    
+    # Verify seller ownership
+    if order.seller_id != UUID(current_user["sub"]):
+        return {
+            "status": "error",
+            "message": "Unauthorized - only seller can respond to dispute"
+        }
+    
+    # Get transaction
+    transaction = db.query(Transaction).filter(
+        Transaction.order_id == order_id
+    ).first()
+    
+    if not transaction:
+        return {
+            "status": "error",
+            "message": "No transaction found for this order"
+        }
+    
+    # Check if chargeback is filed
+    if not transaction.chargeback_filed_at:
+        return {
+            "status": "error",
+            "message": "No chargeback filed - cannot respond"
+        }
+    
+    # Check if already resolved
+    if transaction.chargeback_resolved_at:
+        return {
+            "status": "error",
+            "message": "Chargeback already resolved - cannot add more responses"
+        }
+    
+    # Update response notes and photos
+    transaction.chargeback_evidence_notes = response_data.response_notes
+    if response_data.evidence_photos:
+        transaction.chargeback_evidence_photos = response_data.evidence_photos
+    
+    db.commit()
+    
+    print(f"✅ Chargeback response added for order {order_id}")
+    print(f"   Response: {response_data.response_notes[:100]}...")
+    
+    return {
+        "status": "success",
+        "message": "Response submitted. Bank has been notified."
     }

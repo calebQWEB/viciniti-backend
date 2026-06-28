@@ -55,6 +55,7 @@ async def mark_order_completion(
     order.completion_photos = photos or []
     order.completion_notes = notes
     order.completed_at = datetime.utcnow()
+    order.status = OrderStatus.completed  # Mark order as completed
     
     # Notify buyer to confirm completion
     buyer = db.query(User).filter(User.id == order.buyer_id).first()
@@ -171,9 +172,9 @@ def get_order_completion_evidence(
         "order_id": str(order.id),
         "service": order.listing.title if order.listing else "Service",
         "seller_id": str(order.seller_id),
-        "seller_name": order.seller.full_name if order.seller else "Unknown",
+        "seller_name": order.seller.name if order.seller else "Unknown",
         "buyer_id": str(order.buyer_id),
-        "buyer_name": buyer.full_name if buyer else "Unknown",
+        "buyer_name": buyer.name if buyer else "Unknown",
         "buyer_email": buyer.email if buyer else "Unknown",
         "amount": order.amount,
         "created_at": order.created_at.isoformat() if order.created_at else None,

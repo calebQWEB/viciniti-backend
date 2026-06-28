@@ -6,10 +6,8 @@ from app.schemas.order import OrderCreate, OrderUpdate
 from app.services.notification_service import create_notification
 from app.services.email_service import send_order_completed_email
 from app.models.user import User
+from app.config import PLATFORM_FEE_PERCENTAGE
 from uuid import UUID
-
-# Viciniti's transaction fee percentage
-FEE_PERCENTAGE = 0.05  # 5%
 
 def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
     # Get the listing
@@ -36,7 +34,7 @@ def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
 
     # Calculate amount and fee
     amount = listing.price
-    fee = round(amount * FEE_PERCENTAGE, 2)
+    fee = round(amount * PLATFORM_FEE_PERCENTAGE, 2)
 
     new_order = Order(
         listing_id=order_data.listing_id,

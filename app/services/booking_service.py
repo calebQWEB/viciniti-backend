@@ -7,11 +7,8 @@ from app.services.email_service import send_booking_confirmed_email
 from app.models.user import User
 from app.models.service import Service
 from app.services.notification_service import create_notification
+from app.config import PLATFORM_FEE_PERCENTAGE
 from uuid import UUID
-
-
-# Transaction fee percentage
-FEE_PERCENTAGE = 0.05  # 5%
 
 def create_booking(db: Session, booking_data: BookingCreate, client_id: UUID):
     # Get the service
@@ -31,7 +28,7 @@ def create_booking(db: Session, booking_data: BookingCreate, client_id: UUID):
 
     # Calculate amount and fee
     amount = service.price
-    fee = round(amount * FEE_PERCENTAGE, 2)
+    fee = round(amount * PLATFORM_FEE_PERCENTAGE, 2)
 
     new_booking = Booking(
         service_id=booking_data.service_id,
