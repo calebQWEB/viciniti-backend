@@ -21,20 +21,6 @@ async def mark_order_completion(
     photos: List[str] = None,
     notes: str = None
 ) -> bool:
-    """
-    Seller marks order as completed with proof.
-    
-    Args:
-        db: Database session
-        order_id: Order ID
-        seller_id: Seller user ID (for verification)
-        photos: List of photo URLs showing completion
-        notes: Description of what was completed
-    
-    Returns:
-        True if successful, False if unauthorized or order not found
-    """
-    
     order = db.query(Order).filter(Order.id == order_id).first()
     
     if not order:
@@ -46,19 +32,19 @@ async def mark_order_completion(
         print(f"❌ Unauthorized: User {seller_id} is not seller of order {order_id}")
         return False
     
-    # Verify order is still pending
-    if order.status != OrderStatus.pending:
-        print(f"❌ Order {order_id} is not in pending status (current: {order.status})")
+    # Verify order is paid (payment confirmed, awaiting fulfillment)
+    if order.status != OrderStatus.paid:
+        print(f"❌ Order {order_id} is not in paid status (current: {order.status})")
         return False
     
     # Store completion proof
     order.completion_photos = photos or []
     order.completion_notes = notes
     order.completed_at = datetime.utcnow()
-    order.status = OrderStatus.completed  # Mark order as completed
+   # Move to fulfilled — seller has completed, awaiting buyer confirmation
+    order.status = OrderStatus.fulfilled
     
     # Notify buyer to confirm completion
-    buyer = db.query(User).filter(User.id == order.buyer_id).first()
     create_notification(
         db,
         order.buyer_id,
@@ -82,22 +68,6 @@ async def buyer_confirm_completion(
     rating: int = None,
     review_text: str = None
 ) -> bool:
-    """
-    Buyer confirms order completion.
-    
-    This is critical for chargeback defense - proves buyer accepted the service.
-    
-    Args:
-        db: Database session
-        order_id: Order ID
-        buyer_id: Buyer user ID (for verification)
-        rating: Optional rating 1-5 stars
-        review_text: Optional review text
-    
-    Returns:
-        True if successful, False if unauthorized
-    """
-    
     order = db.query(Order).filter(Order.id == order_id).first()
     
     if not order:
@@ -109,30 +79,33 @@ async def buyer_confirm_completion(
         print(f"❌ Unauthorized: User {buyer_id} is not buyer of order {order_id}")
         return False
     
-    # Verify order has completion proof
+    # Verify order has completion proof from seller
     if not order.completed_at:
         print(f"❌ Order {order_id} is not marked as completed by seller yet")
         return False
+
+    # Verify order is in the right status
+    if order.status != OrderStatus.fulfilled:
+        print(f"❌ Order {order_id} is not in fulfilled status (current: {order.status})")
+        return False
     
-    # Mark as confirmed
+    # Mark as confirmed and move to final completed state
     order.buyer_accepted_at = datetime.utcnow()
-    
-    # NOTE: Order status stays as 'pending' until payment is released
-    # This is intentional - marks it as "service delivered, awaiting payment release"
-    
-    # Notify seller that buyer confirmed
+    order.status = OrderStatus.completed
+
+    # Notify seller
     create_notification(
         db,
         order.seller_id,
-        f"✅ Payment confirmed! Buyer accepted completion of order {order_id}. "
+        f"✅ Buyer confirmed completion of order {order_id}. "
         f"Payment of ₦{order.amount:,.0f} is now being released to your account."
     )
     
-    # Notify buyer of confirmation
+    # Notify buyer
     create_notification(
         db,
         order.buyer_id,
-        f"✅ Thank you for confirming completion! Your service is now complete."
+        f"✅ Thank you for confirming completion! Your order is now complete."
     )
     
     db.commit()

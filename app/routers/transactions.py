@@ -146,7 +146,7 @@ async def verify(
             detail="Unauthorized: Transaction not found"
         )
     
-    is_verified = await verify_payment(verify_data.reference)
+    is_verified = await verify_payment(verify_data.reference, transaction.order_id, db)
 
     if is_verified:
         transaction = update_transaction_status(
@@ -172,8 +172,8 @@ async def verify(
                 if listing:
                     listing.status = ListingStatus.sold
 
-                # Mark order as completed
-                order.status = OrderStatus.completed
+                # Mark order as paid — awaiting seller fulfillment
+                order.status = OrderStatus.paid
                 db.commit()
                 
                 # Notify seller that payment was received
@@ -348,18 +348,15 @@ async def flutterwave_webhook(
                 ).first()
                 if listing:
                     listing.status = ListingStatus.sold
-                
-                # IMPORTANT: Keep order as "pending"
-                # Order only moves to "completed" after:
-                # 1. Seller marks completion (uploads photos + notes)
-                # 2. Buyer confirms completion (rates and accepts)
-                # This creates a strong legal record for chargeback defense
+
+                # Mark order as paid — awaiting seller fulfillment
+                order.status = OrderStatus.paid
                 
                 db.commit()
                 
-                print(f"✅ Payment confirmed for order {order.id}, awaiting completion proof")
+                print(f"✅ Payment confirmed for order {order.id}, awaiting seller fulfillment")
                 
-                # Notify seller that payment was received (work can begin)
+                # Notify seller that payment was received
                 create_notification_deduplicated(
                     db,
                     order.seller_id,

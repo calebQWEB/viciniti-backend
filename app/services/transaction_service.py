@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.models.transaction import Transaction, TransactionStatus, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionUpdate
+from app.models.order import Order
 from app.config import get_settings
 from uuid import UUID
 import httpx
@@ -95,18 +96,43 @@ async def initiate_payment(amount: float, email: str, order_id: str):
         "payment_link": data["data"]["link"]
     }
 
-async def verify_payment(reference: str):
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref={reference}",
-            headers={
-                "Authorization": f"Bearer {settings.FLUTTERWAVE_SECRET_KEY}",
-            }
-        )
+async def verify_payment(reference: str, order_id: UUID, db: Session):
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref={reference}",
+                headers={
+                    "Authorization": f"Bearer {settings.FLUTTERWAVE_SECRET_KEY}",
+                }
+            )
 
-    data = response.json()
+        data = response.json()
 
-    if data.get("status") != "success":
+        if data.get("status") != "success":
+            return False
+
+        if data["data"]["status"] != "successful":
+            return False
+
+        # Fetch the order from the database
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            return False
+
+        # Verify the amount Flutterwave charged matches the order amount
+        flw_amount = data["data"]["amount"]
+        flw_currency = data["data"]["currency"]
+
+        if flw_currency != "NGN":
+            print(f"❌ Currency mismatch: expected NGN, got {flw_currency}")
+            return False
+
+        if flw_amount < order.amount:
+            print(f"❌ Amount mismatch: expected {order.amount}, got {flw_amount}")
+            return False
+
+        return True
+
+    except Exception as e:
+        print(f"❌ verify_payment error: {e}")
         return False
-
-    return data["data"]["status"] == "successful"

@@ -30,6 +30,10 @@ class OrderResponse(OrderBase):
     fee: float
     status: OrderStatus
     created_at: datetime
+    completed_at: Optional[datetime] = None
+    completion_photos: Optional[list] = None
+    completion_notes: Optional[str] = None
+    buyer_accepted_at: Optional[datetime] = None
     listing: Optional[ListingSummary] = None
 
     class Config:

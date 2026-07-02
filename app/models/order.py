@@ -8,9 +8,11 @@ import enum
 
 class OrderStatus(enum.Enum):
     pending = "pending"
-    completed = "completed"
+    paid = "paid"            # Payment confirmed, awaiting seller fulfillment
+    fulfilled = "fulfilled"  # Seller marked complete, awaiting buyer confirmation
+    completed = "completed"  # Buyer confirmed receipt
     cancelled = "cancelled"
-    disputed = "disputed"  # Chargeback filed
+    disputed = "disputed"    # Chargeback filed
 
 class Order(Base):
     __tablename__ = "orders"
