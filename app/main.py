@@ -6,7 +6,7 @@ from app.database import engine
 from app.models import User
 from app.routers import (
     auth, users, listings, services, bookings,
-    orders, messages, notifications, transactions, upload
+    orders, messages, notifications, transactions, upload, bank_accounts
 )
 
 app = FastAPI(
@@ -54,6 +54,7 @@ app.include_router(messages.router)
 app.include_router(notifications.router)
 app.include_router(transactions.router)
 app.include_router(upload.router)
+app.include_router(bank_accounts.router)
 
 @app.get("/")
 def root():

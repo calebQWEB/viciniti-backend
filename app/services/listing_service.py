@@ -6,6 +6,19 @@ from uuid import UUID
 import math
 
 def create_listing(db: Session, listing_data: ListingCreate, user_id: UUID):
+    # Check seller has a default bank account before allowing listing creation
+    from app.models.bank_account import BankAccount
+    default_account = db.query(BankAccount).filter(
+        BankAccount.user_id == UUID(str(user_id)),
+        BankAccount.is_default == True
+    ).first()
+
+    if not default_account:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must add a default payout bank account before creating a listing."
+        )
+
     new_listing = Listing(
         user_id=UUID(str(user_id)),
         title=listing_data.title,
