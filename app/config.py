@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     # Resend Email api
     RESEND_API_KEY: str
     RESEND_FROM_EMAIL: str = "Viciniti <onboarding@resend.dev>"
+    FRONTEND_URL: str
 
     class Config:
         env_file = ".env"

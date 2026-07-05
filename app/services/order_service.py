@@ -11,7 +11,7 @@ from uuid import UUID
 
 def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
     # Get the listing
-    listing = db.query(Listing).filter(Listing.id == order_data.listing_id).first()
+    listing = db.query(Listing).filter(Listing.id == order_data.listing_id).with_for_update().first()
     if not listing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

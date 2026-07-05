@@ -183,3 +183,32 @@ def send_order_completed_email(to: str, name: str, order_id: str):
         </div>
         """
     )
+
+def send_payout_initiated_email(to: str, name: str, amount: float, account_name: str, bank_name: str):
+    send_email(
+        to=to,
+        subject="Your payout has been initiated — Viciniti",
+        html=f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <div style="background: #2D6A4F; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
+                <h1 style="color: white; font-size: 28px; margin: 0; font-weight: 900;">Payout Initiated 🎉</h1>
+            </div>
+            <h2 style="color: #111; font-size: 22px;">Hey {name},</h2>
+            <p style="color: #555; line-height: 1.6;">
+                Great news! Your payout has been initiated and will arrive in your account shortly.
+            </p>
+            <div style="background: #f9f9f9; border-radius: 12px; padding: 20px; margin: 16px 0;">
+                <p style="color: #333; font-weight: 700; margin: 0 0 8px;">Payout Details:</p>
+                <p style="color: #2D6A4F; font-size: 24px; font-weight: 900; margin: 0 0 8px;">₦{amount:,.0f}</p>
+                <p style="color: #555; margin: 0;">To: {account_name} · {bank_name}</p>
+            </div>
+            <a href="https://viciniti-frontend.vercel.app/dashboard/sales"
+               style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
+                View My Sales
+            </a>
+            <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
+                You're receiving this because a buyer confirmed completion of your order on Viciniti.
+            </p>
+        </div>
+        """
+    )

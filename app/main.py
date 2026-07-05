@@ -2,7 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, HTTPBearer
 
-from app.database import engine
+from app.database import engine, Base
+from app.utils.scheduler import start_scheduler
 from app.models import User
 from app.routers import (
     auth, users, listings, services, bookings,
@@ -40,9 +41,9 @@ security = HTTPBearer()
 
 @app.on_event("startup")
 async def startup():
-    from app.database import Base
     Base.metadata.create_all(bind=engine)
-
+    start_scheduler()
+    
 # Routers
 app.include_router(auth.router)
 app.include_router(users.router)

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
+from sympy import Order
 from app.database import get_db
 from app.schemas.transaction import TransactionResponse
 from app.services.transaction_service import (
@@ -115,12 +116,18 @@ async def initiate(
         order_id=payment_data.order_id
     )
 
-    fee = round(payment_data.amount * PLATFORM_FEE_PERCENTAGE, 2)
+    order = db.query(Order).filter(Order.id == payment_data.order_id).first()
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+
     create_transaction(db, TransactionCreate(
         user_id=user.id,
         reference=result["reference"],
         amount=payment_data.amount,
-        fee=fee,
+        fee=order.fee,
         type=TransactionType.payment,
         order_id=payment_data.order_id,
     ))

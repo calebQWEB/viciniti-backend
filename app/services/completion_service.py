@@ -12,6 +12,9 @@ from typing import List
 from app.models.order import Order, OrderStatus
 from app.models.user import User
 from app.services.notification_service import create_notification
+from app.services.payment_service import initiate_seller_payout
+from app.services.review_service import create_review
+from app.schemas.review import ReviewCreate
 
 
 async def mark_order_completion(
@@ -92,6 +95,21 @@ async def buyer_confirm_completion(
     # Mark as confirmed and move to final completed state
     order.buyer_accepted_at = datetime.utcnow()
     order.status = OrderStatus.completed
+
+    # Save the buyer's rating and review
+    if rating:
+        create_review(
+            db,
+            order_id=order_id,
+            buyer_id=buyer_id,
+            seller_id=order.seller_id,
+            data=ReviewCreate(
+                rating=rating,
+                review_text=review_text
+            )
+        )
+
+    await initiate_seller_payout(db, order_id)
 
     # Notify seller
     create_notification(

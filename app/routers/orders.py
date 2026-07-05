@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas import OrderCreate, OrderUpdate, OrderResponse
@@ -101,10 +101,10 @@ async def complete_order(
     )
     
     if not success:
-        return {
-            "status": "error",
-            "message": "Could not mark order as complete. Check ownership and order status."
-        }
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not mark order as complete. Check ownership and order status."
+        )
     
     return {
         "status": "success",
@@ -135,10 +135,10 @@ async def confirm_order_completion(
     )
     
     if not success:
-        return {
-            "status": "error",
-            "message": "Could not confirm completion. Check ownership or order status."
-        }
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not confirm completion. Check ownership or order status."
+        )
     
     return {
         "status": "success",
@@ -162,15 +162,18 @@ def get_completion_evidence(
     evidence = get_order_completion_evidence(db, order_id)
     
     if not evidence:
-        return {"status": "error", "message": "Order not found"}
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
     
     # Verify access
     order = get_order(db, order_id)
     if order.seller_id != UUID(current_user["sub"]) and order.buyer_id != UUID(current_user["sub"]):
-        return {
-            "status": "error",
-            "message": "Unauthorized - only seller and buyer can view evidence"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized - only seller and buyer can view evidence"
+        )
     
     return {
         "status": "success",
@@ -195,39 +198,31 @@ def get_dispute_details(
     order = db.query(Order).filter(Order.id == order_id).first()
     
     if not order:
-        return {
-            "status": "error",
-            "message": "Order not found"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
     
     # Verify seller ownership
     if order.seller_id != UUID(current_user["sub"]):
-        return {
-            "status": "error",
-            "message": "Unauthorized - only seller can view dispute"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized - only seller can view dispute"
+        )
     
     # Get transaction with chargeback details
     transaction = db.query(Transaction).filter(
         Transaction.order_id == order_id
     ).first()
     
-    print(f"🔍 Debug: Looking for transaction with order_id={order_id}")
-    print(f"   Found transaction: {transaction}")
-    if transaction:
-        print(f"   Transaction ID: {transaction.id}")
-        print(f"   Transaction status: {transaction.status}")
-        print(f"   Chargeback filed at: {transaction.chargeback_filed_at}")
-    
     if not transaction:
-        return {
-            "status": "error",
-            "message": "No transaction found for this order"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No transaction found for this order"
+        )
     
     # If no chargeback filed, return that info
     if not transaction.chargeback_filed_at:
-        print(f"❌ No chargeback_filed_at value found")
         return {
             "status": "success",
             "dispute": None,
