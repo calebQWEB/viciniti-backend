@@ -13,6 +13,7 @@ class OrderStatus(enum.Enum):
     completed = "completed"  # Buyer confirmed receipt
     cancelled = "cancelled"
     disputed = "disputed"    # Chargeback filed
+    refunded = "refunded"    # Chargeback lost, buyer refunded
 
 class Order(Base):
     __tablename__ = "orders"

@@ -32,6 +32,7 @@ class Transaction(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Chargeback fields
+    chargeback_id = Column(String, nullable=True)  # Flutterwave chargeback ID
     chargeback_reason = Column(String, nullable=True)  # Reason from bank
     chargeback_filed_at = Column(DateTime, nullable=True)  # When chargeback was filed
     chargeback_evidence_notes = Column(String, nullable=True)  # Your response/evidence notes

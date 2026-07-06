@@ -8,6 +8,7 @@ from app.services.order_service import (
 from app.services.completion_service import (
     mark_order_completion, buyer_confirm_completion, get_order_completion_evidence
 )
+from app.services.notification_service import create_notification
 from app.utils.security import get_current_user
 from typing import List, Optional
 from uuid import UUID
@@ -238,7 +239,7 @@ def get_dispute_details(
             "transaction_id": str(transaction.id),
             "reference": transaction.reference,
             "amount": transaction.amount,
-            "chargeback_status": transaction.status,
+            "chargeback_status": transaction.status.value,
             "chargeback_reason": transaction.chargeback_reason,
             "chargeback_filed_at": transaction.chargeback_filed_at.isoformat() if transaction.chargeback_filed_at else None,
             "chargeback_resolved_at": transaction.chargeback_resolved_at.isoformat() if transaction.chargeback_resolved_at else None,
@@ -258,7 +259,7 @@ class ChargebackResponseRequest(BaseModel):
 
 
 @router.post("/{order_id}/chargeback-response")
-def add_chargeback_response(
+async def add_chargeback_response(
     order_id: UUID,
     response_data: ChargebackResponseRequest,
     current_user: dict = Depends(get_current_user),
@@ -274,17 +275,17 @@ def add_chargeback_response(
     order = db.query(Order).filter(Order.id == order_id).first()
     
     if not order:
-        return {
-            "status": "error",
-            "message": "Order not found"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
     
     # Verify seller ownership
     if order.seller_id != UUID(current_user["sub"]):
-        return {
-            "status": "error",
-            "message": "Unauthorized - only seller can respond to dispute"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized - only seller can respond to dispute"
+        )
     
     # Get transaction
     transaction = db.query(Transaction).filter(
@@ -292,24 +293,24 @@ def add_chargeback_response(
     ).first()
     
     if not transaction:
-        return {
-            "status": "error",
-            "message": "No transaction found for this order"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No transaction found for this order"
+        )
     
     # Check if chargeback is filed
     if not transaction.chargeback_filed_at:
-        return {
-            "status": "error",
-            "message": "No chargeback filed - cannot respond"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No chargeback filed - cannot respond"
+        )
     
     # Check if already resolved
     if transaction.chargeback_resolved_at:
-        return {
-            "status": "error",
-            "message": "Chargeback already resolved - cannot add more responses"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chargeback already resolved - cannot add more responses"
+        )
     
     # Update response notes and photos
     transaction.chargeback_evidence_notes = response_data.response_notes
@@ -317,6 +318,21 @@ def add_chargeback_response(
         transaction.chargeback_evidence_photos = response_data.evidence_photos
     
     db.commit()
+
+    create_notification(
+        db,
+        order.seller_id,
+        f"✅ Your chargeback response has been submitted successfully. Flutterwave will review your evidence and get back to you within 7-14 business days."
+    )
+
+    # Submit evidence to Flutterwave
+    from app.services.chargeback_service import submit_chargeback_evidence
+    await submit_chargeback_evidence(
+        db,
+        order_id,
+        response_notes=response_data.response_notes,
+        evidence_photos=response_data.evidence_photos
+    )
     
     print(f"✅ Chargeback response added for order {order_id}")
     print(f"   Response: {response_data.response_notes[:100]}...")

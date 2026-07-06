@@ -7,13 +7,16 @@ Updates transaction and order status, notifies both parties.
 
 from sqlalchemy.orm import Session
 from uuid import UUID
+import httpx
 from datetime import datetime
 from app.models.transaction import Transaction, TransactionStatus
 from app.models.order import Order, OrderStatus
 from app.models.user import User
 from app.services.notification_service import create_notification
-from app.config import CHARGEBACK_FEE
+from app.config import CHARGEBACK_FEE, get_settings
 
+
+settings = get_settings()
 
 async def handle_chargeback_filed(
     db: Session,
@@ -58,6 +61,7 @@ async def handle_chargeback_filed(
     transaction.status = TransactionStatus.chargeback_filed
     transaction.chargeback_reason = reason
     transaction.chargeback_filed_at = datetime.utcnow()
+    transaction.chargeback_id = dispute_id  # Store Flutterwave dispute ID
     
     # Mark order as disputed
     order.status = OrderStatus.disputed
@@ -118,6 +122,10 @@ async def handle_chargeback_won(
     # Update transaction
     transaction.status = TransactionStatus.chargeback_won
     transaction.chargeback_resolved_at = datetime.utcnow()
+
+    # Move order back to completed
+    if order:
+        order.status = OrderStatus.completed
     
     # Notify seller - they won
     if order:
@@ -162,6 +170,10 @@ async def handle_chargeback_lost(
     # Update transaction
     transaction.status = TransactionStatus.chargeback_lost
     transaction.chargeback_resolved_at = datetime.utcnow()
+
+    # Move order to refunded
+    if order:
+        order.status = OrderStatus.refunded
     
     # Notify seller - they lost
     if order:
@@ -188,3 +200,74 @@ async def handle_chargeback_lost(
     print(f"❌ Chargeback lost for transaction {reference}")
     
     return True
+
+
+async def submit_chargeback_evidence(
+    db: Session,
+    order_id: UUID,
+    response_notes: str,
+    evidence_photos: list = None
+) -> bool:
+    try:
+        # Get transaction
+        transaction = db.query(Transaction).filter(
+            Transaction.order_id == order_id
+        ).first()
+
+        if not transaction:
+            print(f"❌ No transaction found for order {order_id}")
+            return False
+
+        if not transaction.chargeback_id:
+            print(f"❌ No chargeback ID found for transaction {transaction.id}")
+            return False
+
+        uploaded_proof_url = None
+
+        # Step 1 — Upload proof photo if provided
+        if evidence_photos and len(evidence_photos) > 0:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://api.flutterwave.com/v3/chargebacks/upload-proof",
+                    json={"proof": evidence_photos[0]},
+                    headers={
+                        "Authorization": f"Bearer {settings.FLUTTERWAVE_SECRET_KEY}",
+                        "Content-Type": "application/json"
+                    }
+                )
+            data = response.json()
+            if data.get("status") == "success":
+                uploaded_proof_url = data.get("data")
+                print(f"✅ Proof uploaded: {uploaded_proof_url}")
+            else:
+                print(f"⚠️ Proof upload failed: {data.get('message')}")
+
+        # Step 2 — Decline the chargeback with evidence
+        payload = {
+            "status": "declined",
+            "comment": response_notes,
+        }
+        if uploaded_proof_url:
+            payload["uploaded_proof"] = uploaded_proof_url
+
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"https://api.flutterwave.com/v3/chargebacks/{transaction.chargeback_id}",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {settings.FLUTTERWAVE_SECRET_KEY}",
+                    "Content-Type": "application/json"
+                }
+            )
+
+        data = response.json()
+        if data.get("status") != "success":
+            print(f"❌ Chargeback decline failed: {data.get('message')}")
+            return False
+
+        print(f"✅ Chargeback evidence submitted for order {order_id}")
+        return True
+
+    except Exception as e:
+        print(f"❌ submit_chargeback_evidence error: {e}")
+        return False
