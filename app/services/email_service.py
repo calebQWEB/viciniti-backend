@@ -212,3 +212,37 @@ def send_payout_initiated_email(to: str, name: str, amount: float, account_name:
         </div>
         """
     )
+
+def send_chargeback_alert_email(to: str, name: str, amount: float, reason: str, order_id: str):
+    send_email(
+        to=to,
+        subject="⚠️ Chargeback Alert — Action Required",
+        html=f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <div style="background: #dc2626; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
+                <h1 style="color: white; font-size: 28px; margin: 0; font-weight: 900;">⚠️ Chargeback Alert</h1>
+                <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0;">Immediate action required</p>
+            </div>
+            <h2 style="color: #111; font-size: 22px;">Hey {name},</h2>
+            <p style="color: #555; line-height: 1.6;">
+                A chargeback has been filed against your payment for order <strong>#{order_id[:8].upper()}</strong>.
+                You have <strong>48 hours</strong> to provide evidence to dispute this chargeback.
+            </p>
+            <div style="background: #fef2f2; border-radius: 12px; padding: 24px; margin: 24px 0; border-left: 4px solid #dc2626;">
+                <p style="color: #333; font-weight: 700; margin: 0 0 8px;">Dispute Details:</p>
+                <p style="color: #555; margin: 0 0 4px;">Amount: <strong>₦{amount:,.0f}</strong></p>
+                <p style="color: #555; margin: 0;">Reason: <strong>{reason}</strong></p>
+            </div>
+            <p style="color: #555; line-height: 1.6;">
+                Log in to your Viciniti dashboard immediately to submit your evidence and defend this chargeback.
+            </p>
+            <a href="https://viciniti-frontend.vercel.app/dashboard/sales"
+               style="display: inline-block; background: #dc2626; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
+                View Dispute & Submit Evidence
+            </a>
+            <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
+                You're receiving this because a chargeback was filed against your Viciniti account.
+            </p>
+        </div>
+        """
+    )

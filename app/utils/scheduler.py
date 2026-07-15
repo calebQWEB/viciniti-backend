@@ -19,18 +19,23 @@ def cancel_stale_orders():
 
         for order in stale_orders:
             order.status = OrderStatus.cancelled
-            print(f"🕒 Cancelled stale order {order.id}")
+            # print(f"🕒 Cancelled stale order {order.id}")
+
+        cutoff = datetime.utcnow() - timedelta(minutes=30)
+        # print(f"🕒 Cutoff time: {cutoff}")
+        # print(f"🕒 Current UTC time: {datetime.utcnow()}")
+        # print(f"🕒 Found {len(stale_orders)} stale orders")
 
         db.commit()
-        print(f"✅ Stale order cleanup complete. Cancelled {len(stale_orders)} orders.")
+        # print(f"✅ Stale order cleanup complete. Cancelled {len(stale_orders)} orders.")
     except Exception as e:
         print(f"❌ Stale order cleanup error: {e}")
     finally:
         db.close()
 
 def start_scheduler():
-    scheduler.add_job(cancel_stale_orders, "interval", minutes=30)
-    scheduler.add_job(auto_confirm_orders, "interval", hours=12, misfire_grace_time=3600)
+    scheduler.add_job(cancel_stale_orders, "interval", minutes=30, next_run_time=datetime.utcnow())
+    scheduler.add_job(auto_confirm_orders, "interval", hours=12, misfire_grace_time=None, next_run_time=datetime.utcnow())
     scheduler.start()
 
 async def auto_confirm_orders():
@@ -45,7 +50,7 @@ async def auto_confirm_orders():
         for order in stale_orders:
             order.status = OrderStatus.completed
             order.buyer_accepted_at = datetime.utcnow()
-            print(f"🕒 Auto-confirmed order {order.id}")
+            # print(f"🕒 Auto-confirmed order {order.id}")
 
         db.commit()
 
@@ -53,7 +58,7 @@ async def auto_confirm_orders():
         for order in stale_orders:
             await initiate_seller_payout(db, order.id)
 
-        print(f"✅ Auto-confirmation complete. Confirmed {len(stale_orders)} orders.")
+        # print(f"✅ Auto-confirmation complete. Confirmed {len(stale_orders)} orders.")
     except Exception as e:
         print(f"❌ Auto-confirmation error: {e}")
     finally:

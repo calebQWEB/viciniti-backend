@@ -12,6 +12,7 @@ from datetime import datetime
 from app.models.transaction import Transaction, TransactionStatus
 from app.models.order import Order, OrderStatus
 from app.models.user import User
+from app.services.email_service import send_chargeback_alert_email
 from app.services.notification_service import create_notification
 from app.config import CHARGEBACK_FEE, get_settings
 
@@ -71,7 +72,7 @@ async def handle_chargeback_filed(
         db,
         order.seller_id,
         f"⚠️ CHARGEBACK ALERT: Payment for order {order.id} has been disputed by buyer. "
-        f"Reason: {reason}. You have 7 days to provide evidence. "
+        f"Reason: {reason}. You have 48 hours to provide evidence. "
         f"Check your dashboard for details."
     )
     
@@ -83,15 +84,26 @@ async def handle_chargeback_filed(
         f"Your bank is investigating this transaction. "
         f"Please check your email for updates from your bank."
     )
+
+    # Send chargeback alert email to seller
+    seller = db.query(User).filter(User.id == order.seller_id).first()
+    if seller:
+        send_chargeback_alert_email(
+            to=seller.email,
+            name=seller.name,
+            amount=order.amount,
+            reason=reason,
+            order_id=str(order.id)
+        )
     
     # Commit changes
     db.commit()
     
-    print(f"✅ Chargeback recorded for transaction {reference}")
-    print(f"   Order: {order.id}")
-    print(f"   Reason: {reason}")
-    print(f"   Seller notified: {order.seller_id}")
-    print(f"   Buyer notified: {order.buyer_id}")
+    # print(f"✅ Chargeback recorded for transaction {reference}")
+    # print(f"   Order: {order.id}")
+    # print(f"   Reason: {reason}")
+    # print(f"   Seller notified: {order.seller_id}")
+    # print(f"   Buyer notified: {order.buyer_id}")
     
     return True
 
