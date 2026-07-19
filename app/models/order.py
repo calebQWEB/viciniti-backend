@@ -25,6 +25,8 @@ class Order(Base):
     amount = Column(Float, nullable=False)
     fee = Column(Float, nullable=False)
     status = Column(Enum(OrderStatus), default=OrderStatus.pending)
+    buyer_accepted_at = Column(DateTime, nullable=True)  # When buyer confirmed completion
+    payout_due_at = Column(DateTime, nullable=True)  # When seller payout becomes eligible to release (3 days after confirmation)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Completion proof fields

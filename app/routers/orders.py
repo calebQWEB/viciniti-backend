@@ -143,7 +143,7 @@ async def confirm_order_completion(
     
     return {
         "status": "success",
-        "message": "✅ Thank you! Completion confirmed. Seller payment is being processed.",
+        "message": "✅ Thank you! Completion confirmed. Seller payment will be released in 3 days.",
         "order_id": str(order_id)
     }
 
@@ -249,6 +249,68 @@ def get_dispute_details(
             "listing_title": order.listing.title if order.listing else "Order"
         },
         "evidence": evidence
+    }
+
+# Get dispute details for buyer
+@router.get("/{order_id}/dispute/buyer")
+def get_dispute_details_buyer(
+    order_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get chargeback/dispute details for a buyer.
+    Only buyer can view their own dispute status.
+    """
+    from app.models.order import Order
+    from app.models.transaction import Transaction
+
+    order = db.query(Order).filter(Order.id == order_id).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+
+    # Verify buyer ownership
+    if order.buyer_id != UUID(current_user["sub"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized - only buyer can view this dispute"
+        )
+
+    # Get transaction with chargeback details
+    transaction = db.query(Transaction).filter(
+        Transaction.order_id == order_id
+    ).first()
+
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No transaction found for this order"
+        )
+
+    # If no chargeback filed, return that info
+    if not transaction.chargeback_filed_at:
+        return {
+            "status": "success",
+            "dispute": None,
+            "message": "No chargeback filed for this order"
+        }
+
+    return {
+        "status": "success",
+        "dispute": {
+            "transaction_id": str(transaction.id),
+            "reference": transaction.reference,
+            "amount": transaction.amount,
+            "chargeback_status": transaction.status.value,
+            "chargeback_reason": transaction.chargeback_reason,
+            "chargeback_filed_at": transaction.chargeback_filed_at.isoformat() if transaction.chargeback_filed_at else None,
+            "chargeback_resolved_at": transaction.chargeback_resolved_at.isoformat() if transaction.chargeback_resolved_at else None,
+            "listing_title": order.listing.title if order.listing else "Order"
+        }
     }
 
 

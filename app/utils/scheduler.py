@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models.order import Order, OrderStatus
 from datetime import datetime, timedelta
-from app.services.payment_service import initiate_seller_payout
+from app.services.payment_service import initiate_seller_payout, check_seller_payout_eligibility
+from app.services.notification_service import create_notification
 import asyncio
 
 scheduler = AsyncIOScheduler()
@@ -36,6 +37,7 @@ def cancel_stale_orders():
 def start_scheduler():
     scheduler.add_job(cancel_stale_orders, "interval", minutes=30, next_run_time=datetime.utcnow())
     scheduler.add_job(auto_confirm_orders, "interval", hours=12, misfire_grace_time=None, next_run_time=datetime.utcnow())
+    scheduler.add_job(process_due_payouts, "interval", hours=1, misfire_grace_time=None, next_run_time=datetime.utcnow())
     scheduler.start()
 
 async def auto_confirm_orders():
@@ -54,12 +56,59 @@ async def auto_confirm_orders():
 
         db.commit()
 
-        # Trigger payout for each auto-confirmed order
+        # Check payout eligibility and set delay for each auto-confirmed order
         for order in stale_orders:
-            await initiate_seller_payout(db, order.id)
+            is_eligible = await check_seller_payout_eligibility(db, order.id)
+
+            if is_eligible:
+                order.payout_due_at = datetime.utcnow() + timedelta(days=3)
+                create_notification(
+                    db,
+                    order.seller_id,
+                    f"✅ Order {order.id} was auto-confirmed after 3 days. "
+                    f"Payment of ₦{order.amount:,.0f} will be released to your account in 3 days."
+                )
+            else:
+                create_notification(
+                    db,
+                    order.seller_id,
+                    f"⚠️ Order {order.id} was auto-confirmed, but we couldn't find "
+                    f"a bank account on file. Please add one so we can process your payout."
+                )
+
+        db.commit()
 
         # print(f"✅ Auto-confirmation complete. Confirmed {len(stale_orders)} orders.")
     except Exception as e:
         print(f"❌ Auto-confirmation error: {e}")
+    finally:
+        db.close()
+
+async def process_due_payouts():
+    """
+    Finds orders whose 3-day payout delay has passed and are still in
+    'completed' status (no active chargeback), then releases payout.
+    """
+    db: Session = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        due_orders = db.query(Order).filter(
+            Order.payout_due_at.isnot(None),
+            Order.payout_due_at <= now,
+            Order.status == OrderStatus.completed
+        ).all()
+
+        for order in due_orders:
+            success = await initiate_seller_payout(db, order.id)
+            if success:
+                order.payout_due_at = None  # Prevent reprocessing
+                # print(f"✅ Payout released for order {order.id}")
+            else:
+                print(f"❌ Payout failed for order {order.id}, will retry next run")
+
+        db.commit()
+
+    except Exception as e:
+        print(f"❌ process_due_payouts error: {e}")
     finally:
         db.close()

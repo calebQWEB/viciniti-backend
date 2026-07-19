@@ -86,3 +86,27 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
     except Exception as e:
         print(f"❌ initiate_seller_payout error: {e}")
         return False
+    
+async def check_seller_payout_eligibility(db: Session, order_id: UUID) -> bool:
+    """
+    Verify the seller can receive a payout for this order.
+    Called at buyer confirmation time to catch problems early —
+    does NOT move any money.
+    """
+    from app.models.bank_account import BankAccount
+
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        print(f"❌ Order not found: {order_id}")
+        return False
+
+    bank_account = db.query(BankAccount).filter(
+        BankAccount.user_id == order.seller_id,
+        BankAccount.is_default == True
+    ).first()
+
+    if not bank_account:
+        print(f"❌ Seller {order.seller_id} has no default bank account")
+        return False
+
+    return True
