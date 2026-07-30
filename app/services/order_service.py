@@ -1,5 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import cast, String
 from fastapi import HTTPException, status
+from math import ceil
 from app.models.order import Order, OrderStatus
 from app.models.listing import Listing, ListingStatus
 from app.schemas.order import OrderCreate, OrderUpdate
@@ -8,6 +10,7 @@ from app.services.email_service import send_order_completed_email
 from app.models.user import User
 from app.config import PLATFORM_FEE_PERCENTAGE
 from uuid import UUID
+from typing import Optional
 
 def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
     # Get the listing
@@ -50,22 +53,87 @@ def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
 
     return new_order
 
-def get_buyer_orders(db: Session, buyer_id: UUID):
-    return (
+
+def _paginate_orders(
+    db: Session,
+    base_filter,
+    page: int,
+    limit: int,
+    search: Optional[str],
+    status_filter: Optional[str],
+):
+    query = (
         db.query(Order)
         .options(joinedload(Order.listing))
-        .filter(Order.buyer_id == UUID(str(buyer_id)))
-        .order_by(Order.created_at.desc())
+        .filter(base_filter)
+    )
+
+    if status_filter and status_filter != "all":
+        try:
+            status_enum = OrderStatus(status_filter)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status filter: {status_filter}"
+            )
+        query = query.filter(Order.status == status_enum)
+
+    if search:
+        # Order.id is a UUID column -- cast to text so partial/substring
+        # matches work the same way the old client-side search did.
+        query = query.filter(cast(Order.id, String).ilike(f"%{search}%"))
+
+    total = query.count()
+
+    items = (
+        query.order_by(Order.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
         .all()
     )
 
-def get_seller_orders(db: Session, seller_id: UUID):
-    return (
-        db.query(Order)
-        .options(joinedload(Order.listing))
-        .filter(Order.seller_id == UUID(str(seller_id)))
-        .order_by(Order.created_at.desc())
-        .all()
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": max(1, ceil(total / limit)) if total else 1,
+    }
+
+
+def get_buyer_orders(
+    db: Session,
+    buyer_id: UUID,
+    page: int = 1,
+    limit: int = 10,
+    search: Optional[str] = None,
+    status_filter: Optional[str] = None,
+):
+    return _paginate_orders(
+        db,
+        Order.buyer_id == UUID(str(buyer_id)),
+        page,
+        limit,
+        search,
+        status_filter,
+    )
+
+
+def get_seller_orders(
+    db: Session,
+    seller_id: UUID,
+    page: int = 1,
+    limit: int = 10,
+    search: Optional[str] = None,
+    status_filter: Optional[str] = None,
+):
+    return _paginate_orders(
+        db,
+        Order.seller_id == UUID(str(seller_id)),
+        page,
+        limit,
+        search,
+        status_filter,
     )
 
 def get_order(db: Session, order_id: UUID):

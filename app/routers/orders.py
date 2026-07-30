@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas import OrderCreate, OrderUpdate, OrderResponse
@@ -25,6 +25,14 @@ class OrderConfirmationRequest(BaseModel):
     rating: Optional[int] = None  # 1-5 stars
     review: Optional[str] = None
 
+# Paginated response for order listings
+class PaginatedOrders(BaseModel):
+    items: List[OrderResponse]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
 # Create a new order
 @router.post("/", response_model=OrderResponse)
 def create(
@@ -34,21 +42,33 @@ def create(
 ):
     return create_order(db, order_data, current_user["sub"])
 
-# Get all orders where I am the buyer
-@router.get("/my-purchases", response_model=List[OrderResponse])
+# Get all orders where I am the buyer (paginated, filterable, searchable)
+@router.get("/my-purchases", response_model=PaginatedOrders)
 def my_purchases(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=50),
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    return get_buyer_orders(db, current_user["sub"])
+    return get_buyer_orders(
+        db, current_user["sub"], page=page, limit=limit, search=search, status_filter=status
+    )
 
-# Get all orders where I am the seller
-@router.get("/my-sales", response_model=List[OrderResponse])
+# Get all orders where I am the seller (paginated, filterable, searchable)
+@router.get("/my-sales", response_model=PaginatedOrders)
 def my_sales(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=50),
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    return get_seller_orders(db, current_user["sub"])
+    return get_seller_orders(
+        db, current_user["sub"], page=page, limit=limit, search=search, status_filter=status
+    )
 
 # Get a single order by ID
 @router.get("/{order_id}", response_model=OrderResponse)

@@ -115,8 +115,19 @@ def get_user_stats(user_id: UUID, db: Session = Depends(get_db)):
         Transaction.status == TransactionStatus.success
     ).count()
 
+    print(f"User {user_id} has {len(listings)} listings, {len(services)} services, and {transaction_count} successful transactions.")
+
     return {
         "listings": listings,
         "services": services,
         "transaction_count": transaction_count,
     }
+
+@router.get("/{user_id}/reviews")
+def get_reviews(
+    user_id: UUID,
+    db: Session = Depends(get_db)
+):
+    from app.services.review_service import get_seller_reviews
+    reviews = get_seller_reviews(db, user_id)
+    return reviews
