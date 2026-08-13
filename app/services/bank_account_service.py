@@ -3,14 +3,21 @@ from fastapi import HTTPException, status
 from uuid import UUID
 from app.models.bank_account import BankAccount
 from app.schemas.bank_account import BankAccountCreate
+from app.services.payment_service import reschedule_stuck_payouts
 
 def create_bank_account(db: Session, user_id: UUID, data: BankAccountCreate) -> BankAccount:
-    # If this is set as default, unset any existing default first
+    existing_count = db.query(BankAccount).filter(
+        BankAccount.user_id == user_id
+    ).count()
+    is_first_account = existing_count == 0
+
     if data.is_default:
         db.query(BankAccount).filter(
             BankAccount.user_id == user_id,
             BankAccount.is_default == True
         ).update({"is_default": False})
+
+    will_be_default = data.is_default or is_first_account
 
     bank_account = BankAccount(
         user_id=user_id,
@@ -18,12 +25,16 @@ def create_bank_account(db: Session, user_id: UUID, data: BankAccountCreate) -> 
         bank_code=data.bank_code,
         account_number=data.account_number,
         account_name=data.account_name,
-        is_default=data.is_default,
+        is_default=will_be_default,
     )
 
     db.add(bank_account)
     db.commit()
     db.refresh(bank_account)
+
+    if will_be_default:
+        reschedule_stuck_payouts(db, user_id)
+
     return bank_account
 
 
@@ -54,13 +65,11 @@ def delete_bank_account(db: Session, user_id: UUID, account_id: UUID):
     db.commit()
 
 def set_default_bank_account(db: Session, user_id: UUID, account_id: UUID):
-    # Unset any existing default
     db.query(BankAccount).filter(
         BankAccount.user_id == user_id,
         BankAccount.is_default == True
     ).update({"is_default": False})
 
-    # Set new default
     account = db.query(BankAccount).filter(
         BankAccount.id == account_id,
         BankAccount.user_id == user_id
@@ -74,3 +83,5 @@ def set_default_bank_account(db: Session, user_id: UUID, account_id: UUID):
 
     account.is_default = True
     db.commit()
+
+    reschedule_stuck_payouts(db, user_id)

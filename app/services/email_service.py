@@ -246,3 +246,96 @@ def send_chargeback_alert_email(to: str, name: str, amount: float, reason: str, 
         </div>
         """
     )
+
+def send_order_completed_email(to: str, name: str, order_id: str):
+    send_email(
+        to=to,
+        subject="Action needed: Review your completed order — Viciniti",
+        html=f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <div style="background: #2D6A4F; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
+                <h1 style="color: white; font-size: 28px; margin: 0; font-weight: 900;">Order Marked Complete 🎉</h1>
+            </div>
+            <h2 style="color: #111; font-size: 22px;">Hey {name},</h2>
+            <p style="color: #555; line-height: 1.6;">
+                The seller has marked your order <strong>#{order_id[:8].upper()}</strong> as complete.
+                Please review the work and confirm completion so the seller can be paid.
+            </p>
+            <p style="color: #555; line-height: 1.6;">
+                If you don't confirm within 3 days, the order will be automatically confirmed.
+            </p>
+            <a href="https://viciniti-frontend.vercel.app/dashboard/purchases"
+               style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
+                Review & Confirm Order
+            </a>
+            <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
+                You're receiving this because a seller marked your order as completed on Viciniti.
+            </p>
+        </div>
+        """
+    )
+
+def send_payout_scheduled_email(to: str, name: str, amount: float, order_id: str):
+    send_email(
+        to=to,
+        subject="Payout scheduled — Viciniti",
+        html=f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <div style="background: #2D6A4F; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
+                <h1 style="color: white; font-size: 28px; margin: 0; font-weight: 900;">Payout Scheduled ✅</h1>
+            </div>
+            <h2 style="color: #111; font-size: 22px;">Hey {name},</h2>
+            <p style="color: #555; line-height: 1.6;">
+                The buyer has confirmed completion of order <strong>#{order_id[:8].upper()}</strong>.
+                Your payout is now scheduled.
+            </p>
+            <div style="background: #f9f9f9; border-radius: 12px; padding: 20px; margin: 16px 0;">
+                <p style="color: #333; font-weight: 700; margin: 0 0 8px;">Amount:</p>
+                <p style="color: #2D6A4F; font-size: 24px; font-weight: 900; margin: 0;">₦{amount:,.0f}</p>
+            </div>
+            <p style="color: #555; line-height: 1.6;">
+                Your payout will be released within <strong>3 days</strong>, provided no dispute is filed.
+                We'll email you again once it's on its way.
+            </p>
+            <a href="https://viciniti-frontend.vercel.app/dashboard/sales"
+               style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
+                View My Sales
+            </a>
+            <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
+                You're receiving this because a buyer confirmed completion of your order on Viciniti.
+            </p>
+        </div>
+        """
+    )
+
+def send_bank_account_needed_email(to: str, name: str, amount: float, order_id: str):
+    send_email(
+        to=to,
+        subject="Action needed: Add your bank account to get paid — Viciniti",
+        html=f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <div style="background: #dc2626; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
+                <h1 style="color: white; font-size: 28px; margin: 0; font-weight: 900;">⚠️ Add Your Bank Account</h1>
+            </div>
+            <h2 style="color: #111; font-size: 22px;">Hey {name},</h2>
+            <p style="color: #555; line-height: 1.6;">
+                The buyer has confirmed completion of order <strong>#{order_id[:8].upper()}</strong>, 
+                but we couldn't find a bank account on file for you.
+            </p>
+            <div style="background: #fef2f2; border-radius: 12px; padding: 20px; margin: 16px 0; border-left: 4px solid #dc2626;">
+                <p style="color: #333; font-weight: 700; margin: 0 0 8px;">Payout pending:</p>
+                <p style="color: #dc2626; font-size: 24px; font-weight: 900; margin: 0;">₦{amount:,.0f}</p>
+            </div>
+            <p style="color: #555; line-height: 1.6;">
+                Please add your bank account details so we can process this payout.
+            </p>
+            <a href="https://viciniti-frontend.vercel.app/dashboard/profile"
+               style="display: inline-block; background: #dc2626; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
+                Add Bank Account
+            </a>
+            <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
+                You're receiving this because a buyer confirmed completion of your order on Viciniti.
+            </p>
+        </div>
+        """
+    )

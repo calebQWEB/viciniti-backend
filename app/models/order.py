@@ -27,6 +27,7 @@ class Order(Base):
     status = Column(Enum(OrderStatus), default=OrderStatus.pending)
     buyer_accepted_at = Column(DateTime, nullable=True)  # When buyer confirmed completion
     payout_due_at = Column(DateTime, nullable=True)  # When seller payout becomes eligible to release (3 days after confirmation)
+    payout_completed_at = Column(DateTime, nullable=True)  # When payout actually succeeded
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Completion proof fields

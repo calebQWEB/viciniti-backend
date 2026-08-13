@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
+from app.models.order import Order, OrderStatus
 from app.models.listing import Listing, ListingStatus
 from app.models.service import Service, ServiceStatus
 from app.models.transaction import Transaction, TransactionStatus
@@ -109,18 +110,18 @@ def get_user_stats(user_id: UUID, db: Session = Depends(get_db)):
         Service.status == ServiceStatus.active
     ).all()
 
-    # Count successful transactions
-    transaction_count = db.query(Transaction).filter(
-        Transaction.user_id == user_id,
-        Transaction.status == TransactionStatus.success
+    # Count completed orders as seller
+    completed_orders_count = db.query(Order).filter(
+        Order.seller_id == user_id,
+        Order.status == OrderStatus.completed
     ).count()
 
-    print(f"User {user_id} has {len(listings)} listings, {len(services)} services, and {transaction_count} successful transactions.")
+    print(f"User {user_id} has {len(listings)} listings, {len(services)} services, and {completed_orders_count} completed orders.")
 
     return {
         "listings": listings,
         "services": services,
-        "transaction_count": transaction_count,
+        "completed_orders_count": completed_orders_count,
     }
 
 @router.get("/{user_id}/reviews")

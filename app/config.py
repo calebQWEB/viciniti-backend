@@ -5,6 +5,9 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
 
+    # Environment
+    ENVIRONMENT: str = "production"
+
     # JWT
     SECRET_KEY: str
     ALGORITHM: str = "HS256"

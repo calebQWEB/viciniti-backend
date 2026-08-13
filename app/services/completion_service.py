@@ -14,6 +14,7 @@ from app.models.user import User
 from app.services.notification_service import create_notification
 from app.services.payment_service import initiate_seller_payout, check_seller_payout_eligibility
 from app.services.review_service import create_review
+from app.services.email_service import send_payout_scheduled_email, send_bank_account_needed_email
 from app.schemas.review import ReviewCreate
 
 
@@ -182,6 +183,8 @@ async def buyer_confirm_completion(
     # Check seller payout eligibility now, but delay actual payout by 3 days
     is_eligible = await check_seller_payout_eligibility(db, order_id)
 
+    seller = db.query(User).filter(User.id == order.seller_id).first()
+
     if is_eligible:
         order.payout_due_at = datetime.utcnow() + timedelta(days=3)
         create_notification(
@@ -190,6 +193,13 @@ async def buyer_confirm_completion(
             f"✅ Buyer confirmed completion of order {order_id}. "
             f"Payment of ₦{order.amount:,.0f} will be released to your account in 3 days."
         )
+        if seller:
+            send_payout_scheduled_email(
+                to=seller.email,
+                name=seller.name,
+                amount=order.amount,
+                order_id=str(order_id)
+            )
     else:
         create_notification(
             db,
@@ -197,6 +207,13 @@ async def buyer_confirm_completion(
             f"⚠️ Buyer confirmed completion of order {order_id}, but we couldn't find "
             f"a bank account on file. Please add one so we can process your payout."
         )
+        if seller:
+            send_bank_account_needed_email(
+                to=seller.email,
+                name=seller.name,
+                amount=order.amount,
+                order_id=str(order_id)
+            )
 
     # Notify buyer
     create_notification(

@@ -71,6 +71,15 @@ async def verify_bank_account(
     data: BankVerifyRequest,
     current_user: dict = Depends(get_current_user),
 ):
+    settings = get_settings()
+
+    # Dev bypass — skip Flutterwave call in local/dev environments
+    if settings.ENVIRONMENT == "development":
+        return {
+            "account_number": data.account_number,
+            "account_name": "Test Seller Account",
+        }
+
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://api.flutterwave.com/v3/accounts/resolve",

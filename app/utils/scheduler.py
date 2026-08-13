@@ -2,9 +2,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models.order import Order, OrderStatus
+from app.models.user import User
 from datetime import datetime, timedelta
 from app.services.payment_service import initiate_seller_payout, check_seller_payout_eligibility
 from app.services.notification_service import create_notification
+from app.services.email_service import send_payout_scheduled_email, send_bank_account_needed_email
 import asyncio
 
 scheduler = AsyncIOScheduler()
@@ -59,6 +61,7 @@ async def auto_confirm_orders():
         # Check payout eligibility and set delay for each auto-confirmed order
         for order in stale_orders:
             is_eligible = await check_seller_payout_eligibility(db, order.id)
+            seller = db.query(User).filter(User.id == order.seller_id).first()
 
             if is_eligible:
                 order.payout_due_at = datetime.utcnow() + timedelta(days=3)
@@ -68,6 +71,13 @@ async def auto_confirm_orders():
                     f"✅ Order {order.id} was auto-confirmed after 3 days. "
                     f"Payment of ₦{order.amount:,.0f} will be released to your account in 3 days."
                 )
+                if seller:
+                    send_payout_scheduled_email(
+                        to=seller.email,
+                        name=seller.name,
+                        amount=order.amount,
+                        order_id=str(order.id)
+                    )
             else:
                 create_notification(
                     db,
@@ -75,6 +85,13 @@ async def auto_confirm_orders():
                     f"⚠️ Order {order.id} was auto-confirmed, but we couldn't find "
                     f"a bank account on file. Please add one so we can process your payout."
                 )
+                if seller:
+                    send_bank_account_needed_email(
+                        to=seller.email,
+                        name=seller.name,
+                        amount=order.amount,
+                        order_id=str(order.id)
+                    )
 
         db.commit()
 
@@ -102,6 +119,7 @@ async def process_due_payouts():
             success = await initiate_seller_payout(db, order.id)
             if success:
                 order.payout_due_at = None  # Prevent reprocessing
+                order.payout_completed_at = datetime.utcnow()
                 # print(f"✅ Payout released for order {order.id}")
             else:
                 print(f"❌ Payout failed for order {order.id}, will retry next run")

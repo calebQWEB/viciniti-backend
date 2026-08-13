@@ -7,11 +7,12 @@ Handles payout initiation and management for sellers.
 from sqlalchemy.orm import Session
 from uuid import UUID
 import httpx
+from datetime import datetime, timedelta
 from app.config import get_settings
-from app.models.order import Order
+from app.models.order import Order, OrderStatus
 from app.models.bank_account import BankAccount
 from app.services.notification_service import create_notification
-from app.services.email_service import send_payout_initiated_email
+from app.services.email_service import send_payout_initiated_email, send_payout_scheduled_email
 from app.models.user import User
 from uuid import UUID
 import uuid
@@ -110,3 +111,38 @@ async def check_seller_payout_eligibility(db: Session, order_id: UUID) -> bool:
         return False
 
     return True
+
+def reschedule_stuck_payouts(db: Session, seller_id: UUID):
+    """
+    Finds orders for this seller that are stuck — buyer already confirmed,
+    but no payout was scheduled because there was no bank account at the time.
+    Called whenever a seller gains a default bank account (new account, or
+    promoting an existing one to default).
+    """
+    stuck_orders = db.query(Order).filter(
+        Order.seller_id == seller_id,
+        Order.status == OrderStatus.completed,
+        Order.payout_due_at.is_(None)
+    ).all()
+
+    seller = db.query(User).filter(User.id == seller_id).first()
+
+    for order in stuck_orders:
+        order.payout_due_at = datetime.utcnow() + timedelta(days=3)
+
+        create_notification(
+            db,
+            seller_id,
+            f"✅ Your bank account is set up. Payment of ₦{order.amount:,.0f} "
+            f"for order {order.id} will be released to your account in 3 days."
+        )
+
+        if seller:
+            send_payout_scheduled_email(
+                to=seller.email,
+                name=seller.name,
+                amount=order.amount,
+                order_id=str(order.id)
+            )
+
+    db.commit()

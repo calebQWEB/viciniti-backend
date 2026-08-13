@@ -34,6 +34,8 @@ class OrderResponse(OrderBase):
     completion_photos: Optional[list] = None
     completion_notes: Optional[str] = None
     buyer_accepted_at: Optional[datetime] = None
+    payout_due_at: Optional[datetime] = None
+    payout_completed_at: Optional[datetime] = None
     listing: Optional[ListingSummary] = None
 
     class Config:
