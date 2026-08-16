@@ -1,9 +1,11 @@
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.models.service import Service, ServiceStatus
 from app.schemas.service import ServiceCreate, ServiceUpdate
 from uuid import UUID
 import math
+from typing import Optional
 
 def create_service(db: Session, service_data: ServiceCreate, user_id: UUID):
     new_service = Service(
@@ -47,13 +49,55 @@ def get_services(db: Session, category: str = None, location: str = None,
 
     return services
 
-def get_user_services(db: Session, user_id: UUID):
-    return (
-        db.query(Service)
-        .filter(Service.user_id == user_id)
-        .order_by(Service.created_at.desc())
+def get_user_services(
+    db: Session,
+    user_id: UUID,
+    page: int = 1,
+    limit: int = 20,
+    status_filter: Optional[str] = None,
+):
+    query = db.query(Service).filter(Service.user_id == user_id)
+
+    if status_filter and status_filter != "all":
+        try:
+            status_enum = ServiceStatus(status_filter)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status filter: {status_filter}"
+            )
+        query = query.filter(Service.status == status_enum)
+
+    total = query.count()
+
+    items = (
+        query.order_by(Service.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
         .all()
     )
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": max(1, math.ceil(total / limit)) if total else 1,
+    }
+
+
+def get_service_status_counts(db: Session, user_id: UUID):
+    rows = (
+        db.query(Service.status, func.count(Service.id))
+        .filter(Service.user_id == user_id)
+        .group_by(Service.status)
+        .all()
+    )
+    counts = {s.value: 0 for s in ServiceStatus}
+    for status_val, count in rows:
+        counts[status_val.value] = count
+    counts["all"] = sum(counts.values())
+    return counts
 
 def get_service(db: Session, service_id: UUID):
     service = (

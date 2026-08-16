@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.service import ServiceCreate, ServiceUpdate, ServiceResponse
 from app.services.service_service import (
-    create_service, get_services, get_service,
+    create_service, get_service_status_counts, get_services, get_service,
     get_user_services, update_service, delete_service
 )
 from app.utils.security import get_current_user
@@ -36,12 +36,24 @@ def browse(
     return get_services(db, category, location, latitude, longitude, radius_km, skip, limit)
 
 # Get current user's services
-@router.get("/me", response_model=List[ServiceResponse])
+@router.get("/me")
 def my_services(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=50),
+    status: Optional[str] = Query(None),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    return get_user_services(db, current_user["sub"])
+    return get_user_services(
+        db, current_user["sub"], page=page, limit=limit, status_filter=status
+    )
+
+@router.get("/me/counts")
+def my_services_counts(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return get_service_status_counts(db, current_user["sub"])
 
 # Get a single service by ID
 @router.get("/{service_id}", response_model=ServiceResponse)

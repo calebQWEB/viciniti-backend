@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.listing import ListingCreate, ListingUpdate, ListingResponse
 from app.services.listing_service import (
-    create_listing, get_listings, get_listing,
+    create_listing, get_listing_status_counts, get_listings, get_listing,
     get_user_listings, update_listing, delete_listing
 )
 from app.utils.security import get_current_user
@@ -36,12 +36,24 @@ def browse(
     return get_listings(db, category, location, latitude, longitude, radius_km, skip, limit)
 
 # Get current user's listings
-@router.get("/me", response_model=List[ListingResponse])
+@router.get("/me")
 def my_listings(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=50),
+    status: Optional[str] = Query(None),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    return get_user_listings(db, current_user["sub"])
+    return get_user_listings(
+        db, current_user["sub"], page=page, limit=limit, status_filter=status
+    )
+
+@router.get("/me/counts")
+def my_listings_counts(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return get_listing_status_counts(db, current_user["sub"])
 
 # Get a single listing by ID
 @router.get("/{listing_id}", response_model=ListingResponse)
