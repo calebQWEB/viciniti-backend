@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import cast, String
+from sqlalchemy import func
 from fastapi import HTTPException, status
 from math import ceil
 from app.models.order import Order, OrderStatus
@@ -63,10 +64,15 @@ def _paginate_orders(
     status_filter: Optional[str],
 ):
     query = (
-        db.query(Order)
-        .options(joinedload(Order.listing))
-        .filter(base_filter)
+    db.query(Order)
+    .options(
+        joinedload(Order.listing),
+        joinedload(Order.service),
+        joinedload(Order.buyer),
+        joinedload(Order.seller),
     )
+    .filter(base_filter)
+)
 
     if status_filter and status_filter != "all":
         try:
@@ -204,3 +210,16 @@ def cancel_order(db: Session, order_id: UUID, user_id: UUID):
     db.refresh(order)
 
     return order
+
+def get_order_status_counts(db: Session, user_id: UUID, filter_field):
+    rows = (
+        db.query(Order.status, func.count(Order.id))
+        .filter(filter_field == UUID(str(user_id)))
+        .group_by(Order.status)
+        .all()
+    )
+    counts = {s.value: 0 for s in OrderStatus}
+    for status_val, count in rows:
+        counts[status_val.value] = count
+    counts["all"] = sum(counts.values())
+    return counts

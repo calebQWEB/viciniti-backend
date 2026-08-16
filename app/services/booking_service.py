@@ -6,6 +6,7 @@ from app.schemas.booking import BookingCreate, BookingUpdate
 from app.services.email_service import send_booking_confirmed_email
 from app.models.user import User
 from app.models.service import Service
+from app.models.order import Order
 from app.services.notification_service import create_notification
 from app.config import PLATFORM_FEE_PERCENTAGE
 from uuid import UUID
@@ -30,6 +31,18 @@ def create_booking(db: Session, booking_data: BookingCreate, client_id: UUID):
     amount = service.price
     fee = round(amount * PLATFORM_FEE_PERCENTAGE, 2)
 
+    # Create the linked Order first — this drives payment, status, payout, chargebacks
+    new_order = Order(
+        service_id=booking_data.service_id,
+        buyer_id=UUID(str(client_id)),
+        seller_id=service.user_id,
+        amount=amount,
+        fee=fee,
+    )
+    db.add(new_order)
+    db.commit()
+    db.refresh(new_order)
+
     new_booking = Booking(
         service_id=booking_data.service_id,
         client_id=UUID(str(client_id)),
@@ -37,6 +50,7 @@ def create_booking(db: Session, booking_data: BookingCreate, client_id: UUID):
         amount=amount,
         fee=fee,
         scheduled_at=booking_data.scheduled_at,
+        order_id=new_order.id,
     )
 
     db.add(new_booking)
@@ -55,7 +69,11 @@ def create_booking(db: Session, booking_data: BookingCreate, client_id: UUID):
 def get_client_bookings(db: Session, client_id: UUID):
     return (
         db.query(Booking)
-        .options(joinedload(Booking.service))
+        .options(
+            joinedload(Booking.service),
+            joinedload(Booking.client),
+            joinedload(Booking.provider),
+        )
         .filter(Booking.client_id == UUID(str(client_id)))
         .order_by(Booking.created_at.desc())
         .all()
@@ -64,7 +82,11 @@ def get_client_bookings(db: Session, client_id: UUID):
 def get_provider_bookings(db: Session, provider_id: UUID):
     return (
         db.query(Booking)
-        .options(joinedload(Booking.service))
+        .options(
+            joinedload(Booking.service),
+            joinedload(Booking.client),
+            joinedload(Booking.provider),
+        )
         .filter(Booking.provider_id == UUID(str(provider_id)))
         .order_by(Booking.created_at.desc())
         .all()

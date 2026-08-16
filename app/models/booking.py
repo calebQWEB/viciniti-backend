@@ -19,6 +19,7 @@ class Booking(Base):
     service_id = Column(UUID(as_uuid=True), ForeignKey("services.id"), nullable=False)
     client_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     provider_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True)
     amount = Column(Float, nullable=False)
     fee = Column(Float, nullable=False)
     scheduled_at = Column(DateTime, nullable=False)
@@ -29,3 +30,4 @@ class Booking(Base):
     service = relationship("Service", backref="bookings")
     client = relationship("User", foreign_keys=[client_id], backref="client_bookings")
     provider = relationship("User", foreign_keys=[provider_id], backref="provider_bookings")
+    order = relationship("Order", backref="booking")

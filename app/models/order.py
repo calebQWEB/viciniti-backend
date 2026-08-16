@@ -19,24 +19,25 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id"), nullable=False)
+    listing_id = Column(UUID(as_uuid=True), ForeignKey("listings.id"), nullable=True)
+    service_id = Column(UUID(as_uuid=True), ForeignKey("services.id"), nullable=True)
     buyer_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     seller_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     amount = Column(Float, nullable=False)
     fee = Column(Float, nullable=False)
     status = Column(Enum(OrderStatus), default=OrderStatus.pending)
-    buyer_accepted_at = Column(DateTime, nullable=True)  # When buyer confirmed completion
-    payout_due_at = Column(DateTime, nullable=True)  # When seller payout becomes eligible to release (3 days after confirmation)
-    payout_completed_at = Column(DateTime, nullable=True)  # When payout actually succeeded
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Completion proof fields
-    completion_photos = Column(JSON, default=[])  # List of photo URLs
-    completion_notes = Column(String, nullable=True)  # Seller's description of work done
-    completed_at = Column(DateTime, nullable=True)  # When seller marked complete
-    buyer_accepted_at = Column(DateTime, nullable=True)  # When buyer confirmed completion
+    completion_photos = Column(JSON, default=[])
+    completion_notes = Column(String, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    buyer_accepted_at = Column(DateTime, nullable=True)
+    payout_due_at = Column(DateTime, nullable=True)
+    payout_completed_at = Column(DateTime, nullable=True)
 
     # Relationships
     listing = relationship("Listing", backref="orders")
+    service = relationship("Service", backref="orders")
     buyer = relationship("User", foreign_keys=[buyer_id], backref="purchases")
     seller = relationship("User", foreign_keys=[seller_id], backref="sales")

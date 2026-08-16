@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas import OrderCreate, OrderUpdate, OrderResponse
 from app.services.order_service import (
-    create_order, get_buyer_orders, get_seller_orders, get_order, update_order, cancel_order
+    create_order, get_buyer_orders, get_seller_orders, get_order, update_order, cancel_order, get_order_status_counts
 )
 from app.services.completion_service import (
     mark_order_completion, buyer_confirm_completion, get_order_completion_evidence
 )
+from app.models.order import Order
 from app.services.notification_service import create_notification
 from app.utils.security import get_current_user
 from typing import List, Optional
@@ -423,3 +424,17 @@ async def add_chargeback_response(
         "status": "success",
         "message": "Response submitted. Bank has been notified."
     }
+
+@router.get("/my-purchases/counts")
+def my_purchases_counts(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return get_order_status_counts(db, current_user["sub"], Order.buyer_id)
+
+@router.get("/my-sales/counts")
+def my_sales_counts(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return get_order_status_counts(db, current_user["sub"], Order.seller_id)

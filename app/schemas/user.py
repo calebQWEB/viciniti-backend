@@ -39,3 +39,11 @@ class UserResponse(UserBase):
 
     class Config:
         from_attributes = True
+
+class UserSummary(BaseModel):
+    id: UUID
+    name: str
+    avatar: Optional[str] = None
+
+    class Config:
+        from_attributes = True

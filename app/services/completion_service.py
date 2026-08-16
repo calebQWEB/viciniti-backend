@@ -257,7 +257,7 @@ def get_order_completion_evidence(
     
     evidence = {
         "order_id": str(order.id),
-        "service": order.listing.title if order.listing else "Service",
+        "service": order.listing.title if order.listing else (order.service.title if order.service else "Service"),
         "seller_id": str(order.seller_id),
         "seller_name": order.seller.name if order.seller else "Unknown",
         "buyer_id": str(order.buyer_id),

@@ -4,8 +4,17 @@ from datetime import datetime
 from uuid import UUID
 from app.models.order import OrderStatus
 from app.schemas.listing import ImageObject
+from app.schemas.user import UserSummary
 
 class ListingSummary(BaseModel):
+    id: UUID
+    title: str
+    images: List[ImageObject]
+
+    class Config:
+        from_attributes = True
+
+class ServiceSummary(BaseModel):
     id: UUID
     title: str
     images: List[ImageObject]
@@ -22,8 +31,10 @@ class OrderCreate(OrderBase):
 class OrderUpdate(BaseModel):
     status: Optional[OrderStatus] = None
 
-class OrderResponse(OrderBase):
+class OrderResponse(BaseModel):
     id: UUID
+    listing_id: Optional[UUID] = None
+    service_id: Optional[UUID] = None
     buyer_id: UUID
     seller_id: UUID
     amount: float
@@ -37,6 +48,9 @@ class OrderResponse(OrderBase):
     payout_due_at: Optional[datetime] = None
     payout_completed_at: Optional[datetime] = None
     listing: Optional[ListingSummary] = None
+    service: Optional[ServiceSummary] = None
+    buyer: Optional[UserSummary] = None
+    seller: Optional[UserSummary] = None
 
     class Config:
         from_attributes = True
