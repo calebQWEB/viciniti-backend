@@ -1,10 +1,11 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from fastapi import HTTPException, status
 from app.models.message import Message
 from app.schemas.message import MessageCreate
 from app.services.notification_service import create_notification
 from app.services.email_service import send_new_message_email
 from app.models.user import User
+from sqlalchemy import or_, and_, func
 from uuid import UUID
 
 def send_message(db: Session, message_data: MessageCreate, sender_id: UUID):
@@ -47,18 +48,22 @@ def send_message(db: Session, message_data: MessageCreate, sender_id: UUID):
     return new_message
 
 def get_conversation(db: Session, user_id: UUID, other_user_id: UUID):
-    # Get all messages between two users
-    messages = db.query(Message).filter(
-        (
-            (Message.sender_id == UUID(str(user_id))) &
-            (Message.receiver_id == UUID(str(other_user_id)))
-        ) | (
-            (Message.sender_id == UUID(str(other_user_id))) &
-            (Message.receiver_id == UUID(str(user_id)))
+    messages = (
+        db.query(Message)
+        .options(joinedload(Message.sender), joinedload(Message.receiver))
+        .filter(
+            (
+                (Message.sender_id == UUID(str(user_id))) &
+                (Message.receiver_id == UUID(str(other_user_id)))
+            ) | (
+                (Message.sender_id == UUID(str(other_user_id))) &
+                (Message.receiver_id == UUID(str(user_id)))
+            )
         )
-    ).order_by(Message.created_at.asc()).all()
+        .order_by(Message.created_at.asc())
+        .all()
+    )
 
-    # Mark unread messages as read
     for message in messages:
         if message.receiver_id == UUID(str(user_id)) and not message.read:
             message.read = True
@@ -78,3 +83,32 @@ def get_unread_count(db: Session, user_id: UUID):
         Message.read == False
     ).count()
     return {"unread_count": count}
+
+def get_contacts(db: Session, user_id: UUID):
+    uid = UUID(str(user_id))
+
+    # All messages involving this user, most recent first
+    messages = (
+        db.query(Message)
+        .options(joinedload(Message.sender), joinedload(Message.receiver))
+        .filter(or_(Message.sender_id == uid, Message.receiver_id == uid))
+        .order_by(Message.created_at.desc())
+        .all()
+    )
+
+    contacts = {}
+    for msg in messages:
+        other = msg.receiver if msg.sender_id == uid else msg.sender
+        if other.id not in contacts:
+            contacts[other.id] = {
+                "user_id": other.id,
+                "name": other.name,
+                "avatar": other.avatar,
+                "last_message": msg.content,
+                "last_message_time": msg.created_at,
+                "unread_count": 0,
+            }
+        if msg.receiver_id == uid and not msg.read:
+            contacts[other.id]["unread_count"] += 1
+
+    return list(contacts.values())

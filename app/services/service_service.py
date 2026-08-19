@@ -1,6 +1,7 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
+from sqlalchemy.orm import joinedload
 from app.models.service import Service, ServiceStatus
 from app.schemas.service import ServiceCreate, ServiceUpdate
 from uuid import UUID
@@ -102,6 +103,7 @@ def get_service_status_counts(db: Session, user_id: UUID):
 def get_service(db: Session, service_id: UUID):
     service = (
         db.query(Service)
+        .options(joinedload(Service.owner))
         .filter(Service.id == service_id)
         .first()
     )

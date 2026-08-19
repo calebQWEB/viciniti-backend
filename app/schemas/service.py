@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 from app.models.service import ServiceStatus
 from app.schemas.listing import ImageObject
+from app.schemas.user import UserSummary
 
 class ServiceBase(BaseModel):
     title: str
@@ -34,6 +35,7 @@ class ServiceResponse(ServiceBase):
     images: List[ImageObject]
     status: ServiceStatus
     created_at: datetime
+    owner: Optional[UserSummary] = None
 
     class Config:
         from_attributes = True

@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.schemas.message import MessageCreate, MessageResponse
+from app.schemas.message import MessageCreate, MessageResponse, ContactResponse
 from app.services.message_service import (
-    send_message, get_conversation, get_inbox, get_unread_count
+    send_message, get_conversation, get_inbox, get_unread_count, get_contacts
 )
 from app.utils.security import get_current_user
 from typing import List
@@ -44,3 +44,10 @@ def unread_count(
     db: Session = Depends(get_db)
 ):
     return get_unread_count(db, current_user["sub"])
+
+@router.get("/contacts", response_model=List[ContactResponse])
+def contacts(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return get_contacts(db, current_user["sub"])

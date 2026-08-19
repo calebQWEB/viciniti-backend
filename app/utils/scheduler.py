@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models.order import Order, OrderStatus
 from app.models.user import User
+from app.models.booking import Booking, BookingStatus
+from app.models.service import Service
 from datetime import datetime, timedelta
 from app.services.payment_service import initiate_seller_payout, check_seller_payout_eligibility
 from app.services.notification_service import create_notification
@@ -40,6 +42,7 @@ def start_scheduler():
     scheduler.add_job(cancel_stale_orders, "interval", minutes=30, next_run_time=datetime.utcnow())
     scheduler.add_job(auto_confirm_orders, "interval", hours=12, misfire_grace_time=None, next_run_time=datetime.utcnow())
     scheduler.add_job(process_due_payouts, "interval", hours=1, misfire_grace_time=None, next_run_time=datetime.utcnow())
+    scheduler.add_job(expire_stale_booking_requests, "interval", hours=1, misfire_grace_time=None, next_run_time=datetime.utcnow())
     scheduler.start()
 
 async def auto_confirm_orders():
@@ -128,5 +131,46 @@ async def process_due_payouts():
 
     except Exception as e:
         print(f"❌ process_due_payouts error: {e}")
+    finally:
+        db.close()
+
+def expire_stale_booking_requests():
+    db: Session = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(hours=72)
+        stale_bookings = db.query(Booking).filter(
+            Booking.status == BookingStatus.pending,
+            Booking.created_at < cutoff
+        ).all()
+
+        for booking in stale_bookings:
+            booking.status = BookingStatus.cancelled
+
+        db.commit()
+
+        for booking in stale_bookings:
+            service = db.query(Service).filter(Service.id == booking.service_id).first()
+            service_title = service.title if service else "the service"
+
+            # Notify buyer
+            create_notification(
+                db,
+                booking.client_id,
+                f"Your booking request for {service_title} wasn't accepted in time and has been "
+                f"automatically cancelled. No payment was taken."
+            )
+
+            # Notify provider
+            create_notification(
+                db,
+                booking.provider_id,
+                f"You missed a booking request for {service_title} — it expired after 72 hours "
+                f"with no response."
+            )
+
+        db.commit()
+
+    except Exception as e:
+        print(f"❌ Booking expiry error: {e}")
     finally:
         db.close()

@@ -3,6 +3,7 @@ from typing import Optional, List
 from datetime import datetime
 from uuid import UUID
 from app.models.booking import BookingStatus
+from app.models.order import OrderStatus
 from app.schemas.listing import ImageObject
 from app.schemas.user import UserSummary
 
@@ -30,6 +31,7 @@ class BookingResponse(BookingBase):
     client_id: UUID
     provider_id: UUID
     order_id: Optional[UUID] = None
+    order_status: Optional[OrderStatus] = None
     amount: float
     fee: float
     status: BookingStatus
@@ -37,6 +39,6 @@ class BookingResponse(BookingBase):
     service: Optional[ServiceSummary] = None
     client: Optional[UserSummary] = None
     provider: Optional[UserSummary] = None
-    
+
     class Config:
         from_attributes = True

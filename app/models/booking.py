@@ -31,3 +31,7 @@ class Booking(Base):
     client = relationship("User", foreign_keys=[client_id], backref="client_bookings")
     provider = relationship("User", foreign_keys=[provider_id], backref="provider_bookings")
     order = relationship("Order", backref="booking")
+
+    @property
+    def order_status(self):
+        return self.order.status if self.order else None
