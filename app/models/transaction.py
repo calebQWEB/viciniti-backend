@@ -23,7 +23,7 @@ class Transaction(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    order_id = Column(UUID(as_uuid=True), nullable=True)  # ← links to order or booking
+    order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True)  # ← links to order or booking
     reference = Column(String, unique=True, nullable=False)
     amount = Column(Float, nullable=False)
     fee = Column(Float, nullable=False)
@@ -45,3 +45,13 @@ class Transaction(Base):
     terms_version = Column(String, nullable=True)  # e.g. "v1.0"
 
     user = relationship("User", backref="transactions")
+    @property
+    def order(self):
+        if not self.order_id:
+            return None
+        from app.models.order import Order
+        ord_obj = self._order_ref
+        if not ord_obj:
+            return None
+        title = ord_obj.listing.title if ord_obj.listing else (ord_obj.service.title if ord_obj.service else "Item")
+        return {"id": ord_obj.id, "item_title": title}

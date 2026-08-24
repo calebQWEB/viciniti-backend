@@ -17,12 +17,18 @@ class TransactionCreate(TransactionBase):
 class TransactionUpdate(BaseModel):
     status: Optional[TransactionStatus] = None
 
+class TransactionOrderSummary(BaseModel):
+    id: UUID
+    item_title: str
+
 class TransactionResponse(TransactionBase):
     id: UUID
     user_id: UUID
     reference: str
     status: TransactionStatus
     created_at: datetime
+    order_id: Optional[UUID] = None
+    order: Optional[TransactionOrderSummary] = None
 
     class Config:
         from_attributes = True

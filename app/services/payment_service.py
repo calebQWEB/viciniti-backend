@@ -10,9 +10,11 @@ import httpx
 from datetime import datetime, timedelta
 from app.config import get_settings
 from app.models.order import Order, OrderStatus
+from app.models.transaction import Transaction, TransactionCreate, TransactionType, TransactionStatus
 from app.models.bank_account import BankAccount
 from app.services.notification_service import create_notification
 from app.services.email_service import send_payout_initiated_email, send_payout_scheduled_email
+from app.services.transaction_service import create_transaction
 from app.models.user import User
 from uuid import UUID
 import uuid
@@ -28,7 +30,6 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
             print(f"❌ Order not found: {order_id}")
             return False
 
-        # Fetch seller's default bank account
         bank_account = db.query(BankAccount).filter(
             BankAccount.user_id == order.seller_id,
             BankAccount.is_default == True
@@ -38,10 +39,9 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
             print(f"❌ Seller {order.seller_id} has no default bank account")
             return False
 
-        # Calculate payout amount (order amount minus platform fee)
         payout_amount = order.amount - order.fee
+        reference = f"PAYOUT-{uuid.uuid4().hex[:8].upper()}"
 
-        # Call Flutterwave Transfer API
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://api.flutterwave.com/v3/transfers",
@@ -51,7 +51,7 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
                     "amount": payout_amount,
                     "currency": "NGN",
                     "narration": f"Viciniti payout for order {order_id}",
-                    "reference": f"PAYOUT-{uuid.uuid4().hex[:8].upper()}",
+                    "reference": reference,
                 },
                 headers={
                     "Authorization": f"Bearer {settings.FLUTTERWAVE_SECRET_KEY}",
@@ -65,14 +65,25 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
             print(f"❌ Payout failed for order {order_id}: {data.get('message')}")
             return False
 
-        # Notify seller in-app
+        # Record this payout as a Transaction
+        create_transaction(db, TransactionCreate(
+            user_id=order.seller_id,
+            reference=reference,
+            amount=payout_amount,
+            fee=0,
+            type=TransactionType.payout,
+            order_id=order_id,
+        ))
+        transaction = db.query(Transaction).filter(Transaction.reference == reference).first()
+        transaction.status = TransactionStatus.success
+        db.commit()
+
         create_notification(
             db,
             order.seller_id,
             f"🎉 Your payout of ₦{payout_amount:,.0f} has been initiated and will arrive in your account shortly."
         )
 
-        # Send payout email to seller
         seller = db.query(User).filter(User.id == order.seller_id).first()
         if seller:
             send_payout_initiated_email(
