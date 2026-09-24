@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import List
 from app.models.order import Order, OrderStatus
 from app.models.user import User
+from app.models.notification import NotificationType
 from app.services.notification_service import create_notification
 from app.services.payment_service import initiate_seller_payout, check_seller_payout_eligibility
 from app.services.review_service import create_review
@@ -53,7 +54,9 @@ async def mark_order_completion(
         db,
         order.buyer_id,
         f"✓ Your service is complete! Please review and confirm completion. "
-        f"Service: {order.listing.title if order.listing else 'Order'}"
+        f"Service: {order.listing.title if order.listing else 'Order'}",
+        type=NotificationType.order,
+        link="/dashboard/purchases",
     )
     
     db.commit()
@@ -191,7 +194,9 @@ async def buyer_confirm_completion(
             db,
             order.seller_id,
             f"✅ Buyer confirmed completion of order {order_id}. "
-            f"Payment of ₦{order.amount:,.0f} will be released to your account in 3 days."
+            f"Payment of ₦{order.amount:,.0f} will be released to your account in 3 days.",
+            type=NotificationType.payout,
+            link="/dashboard/payments",
         )
         if seller:
             send_payout_scheduled_email(
@@ -205,7 +210,9 @@ async def buyer_confirm_completion(
             db,
             order.seller_id,
             f"⚠️ Buyer confirmed completion of order {order_id}, but we couldn't find "
-            f"a bank account on file. Please add one so we can process your payout."
+            f"a bank account on file. Please add one so we can process your payout.",
+            type=NotificationType.payout,
+            link="/dashboard/profile",
         )
         if seller:
             send_bank_account_needed_email(
@@ -219,7 +226,9 @@ async def buyer_confirm_completion(
     create_notification(
         db,
         order.buyer_id,
-        f"✅ Thank you for confirming completion! Your order is now complete."
+        f"✅ Thank you for confirming completion! Your order is now complete.",
+        type=NotificationType.order,
+        link="/dashboard/purchases",
     )
     
     db.commit()

@@ -10,7 +10,8 @@ from uuid import UUID
 import httpx
 from datetime import datetime
 from app.models.transaction import Transaction, TransactionStatus
-from app.models.order import Order, OrderStatus
+from app.models.order import Order, OrderStatusS
+from app.models.notification import NotificationType
 from app.models.user import User
 from app.services.email_service import send_chargeback_alert_email
 from app.services.notification_service import create_notification
@@ -66,23 +67,27 @@ async def handle_chargeback_filed(
     
     # Mark order as disputed
     order.status = OrderStatus.disputed
-    
+
     # Notify seller about the chargeback
     create_notification(
         db,
         order.seller_id,
         f"⚠️ CHARGEBACK ALERT: Payment for order {order.id} has been disputed by buyer. "
         f"Reason: {reason}. You have 48 hours to provide evidence. "
-        f"Check your dashboard for details."
+        f"Check your dashboard for details.",
+        type=NotificationType.chargeback,
+        link=f"/dashboard/sales/{order.id}/dispute",
     )
-    
+
     # Notify buyer about the chargeback
     create_notification(
         db,
         order.buyer_id,
         f"⚠️ Payment dispute filed for order {order.id}. "
         f"Your bank is investigating this transaction. "
-        f"Please check your email for updates from your bank."
+        f"Please check your email for updates from your bank.",
+        type=NotificationType.chargeback,
+        link=f"/dashboard/purchases/{order.id}/dispute",
     )
 
     # Send chargeback alert email to seller
@@ -145,7 +150,9 @@ async def handle_chargeback_won(
             db,
             order.seller_id,
             f"✅ CHARGEBACK WON: The dispute for order {order.id} was resolved in your favor. "
-            f"Payment of ₦{order.amount:,.0f} remains with you. Thank you for providing evidence!"
+            f"Payment of ₦{order.amount:,.0f} remains with you. Thank you for providing evidence!",
+            type=NotificationType.chargeback,
+            link=f"/dashboard/sales/{order.id}/dispute",
         )
     
     db.commit()
@@ -186,25 +193,27 @@ async def handle_chargeback_lost(
     # Move order to refunded
     if order:
         order.status = OrderStatus.refunded
-    
-    # Notify seller - they lost
+
     if order:
         create_notification(
             db,
             order.seller_id,
             f"❌ CHARGEBACK LOST: The dispute for order {order.id} was resolved against you. "
             f"Payment of ₦{order.amount:,.0f} has been reversed to the buyer. "
-            f"A chargeback fee of ₦{CHARGEBACK_FEE:,.0f} has been deducted from your account."
+            f"A chargeback fee of ₦{CHARGEBACK_FEE:,.0f} has been deducted from your account.",
+            type=NotificationType.chargeback,
+            link=f"/dashboard/sales/{order.id}/dispute",
         )
-    
-    # Notify buyer - they won
+
     if order:
         create_notification(
             db,
             order.buyer_id,
             f"✅ Refund Processed: Your dispute for order {order.id} was successful. "
             f"₦{refund_amount or order.amount:,.0f} will be returned to your bank account "
-            f"within 5-10 business days."
+            f"within 5-10 business days.",
+            type=NotificationType.chargeback,
+            link=f"/dashboard/purchases/{order.id}/dispute",
         )
     
     db.commit()

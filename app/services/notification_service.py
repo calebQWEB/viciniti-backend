@@ -1,19 +1,28 @@
 from sqlalchemy.orm import Session
-from app.models.notification import Notification
+from app.models.notification import Notification, NotificationType
 from app.services.email_service import send_notification_email
 from app.models.user import User
 from uuid import UUID
+from typing import Optional
+from math import ceil
 
-def create_notification(db: Session, user_id: UUID, message: str):
+def create_notification(
+        db: Session,
+        user_id: UUID,
+        message: str,
+        type: Optional[NotificationType] = None,
+        link: Optional[str] = None,
+):
     notification = Notification(
         user_id=UUID(str(user_id)),
         message=message,
+        type=type,
+        link=link,
     )
     db.add(notification)
     db.commit()
     db.refresh(notification)
 
-    # Fetch user and send email
     user = db.query(User).filter(User.id == UUID(str(user_id))).first()
     if user:
         send_notification_email(
@@ -24,10 +33,34 @@ def create_notification(db: Session, user_id: UUID, message: str):
 
     return notification
 
-def get_notifications(db: Session, user_id: UUID):
-    return db.query(Notification).filter(
-        Notification.user_id == UUID(str(user_id))
-    ).order_by(Notification.created_at.desc()).all()
+def get_notifications(
+        db: Session,
+        user_id: UUID,
+        page: int = 1,
+        limit: int = 20,
+        unread_only: bool = False,
+):
+    query = db.query(Notification).filter(Notification.user_id == UUID(str(user_id)))
+
+    if unread_only:
+        query = query.filter(Notification.read == False)
+
+    total = query.count()
+
+    items = (
+        query.order_by(Notification.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": max(1, ceil(total / limit)) if total else 1,
+    }
 
 def mark_as_read(db: Session, notification_id: UUID, user_id: UUID):
     notification = db.query(Notification).filter(

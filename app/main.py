@@ -7,7 +7,7 @@ from app.utils.scheduler import start_scheduler
 from app.models import User
 from app.routers import (
     auth, users, listings, services, bookings,
-    orders, messages, notifications, transactions, upload, bank_accounts
+    orders, messages, notifications, transactions, upload, bank_accounts, categories, home
 )
 
 app = FastAPI(
@@ -56,6 +56,8 @@ app.include_router(notifications.router)
 app.include_router(transactions.router)
 app.include_router(upload.router)
 app.include_router(bank_accounts.router)
+app.include_router(categories.router)
+app.include_router(home.router)
 
 @app.get("/")
 def root():

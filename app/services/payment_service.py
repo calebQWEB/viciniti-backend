@@ -10,7 +10,8 @@ import httpx
 from datetime import datetime, timedelta
 from app.config import get_settings
 from app.models.order import Order, OrderStatus
-from app.models.transaction import Transaction, TransactionCreate, TransactionType, TransactionStatus
+from app.models.transaction import Transaction, TransactionType, TransactionStatus
+from app.schemas.transaction import TransactionCreate
 from app.models.bank_account import BankAccount
 from app.services.notification_service import create_notification
 from app.services.email_service import send_payout_initiated_email, send_payout_scheduled_email
@@ -81,7 +82,9 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
         create_notification(
             db,
             order.seller_id,
-            f"🎉 Your payout of ₦{payout_amount:,.0f} has been initiated and will arrive in your account shortly."
+            f"🎉 Your payout of ₦{payout_amount:,.0f} has been initiated and will arrive in your account shortly.",
+            type=NotificationType.payout,
+            link="/dashboard/payments",
         )
 
         seller = db.query(User).filter(User.id == order.seller_id).first()
@@ -145,7 +148,9 @@ def reschedule_stuck_payouts(db: Session, seller_id: UUID):
             db,
             seller_id,
             f"✅ Your bank account is set up. Payment of ₦{order.amount:,.0f} "
-            f"for order {order.id} will be released to your account in 3 days."
+            f"for order {order.id} will be released to your account in 3 days.",
+            type=NotificationType.payout,
+            link="/dashboard/payments",
         )
 
         if seller:

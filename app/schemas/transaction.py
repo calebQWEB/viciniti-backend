@@ -21,6 +21,9 @@ class TransactionOrderSummary(BaseModel):
     id: UUID
     item_title: str
 
+    class Config:
+        from_attributes = True
+
 class TransactionResponse(TransactionBase):
     id: UUID
     user_id: UUID
@@ -28,7 +31,7 @@ class TransactionResponse(TransactionBase):
     status: TransactionStatus
     created_at: datetime
     order_id: Optional[UUID] = None
-    order: Optional[TransactionOrderSummary] = None
+    order_summary: Optional[TransactionOrderSummary] = None
 
     class Config:
         from_attributes = True

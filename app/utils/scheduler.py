@@ -72,7 +72,9 @@ async def auto_confirm_orders():
                     db,
                     order.seller_id,
                     f"✅ Order {order.id} was auto-confirmed after 3 days. "
-                    f"Payment of ₦{order.amount:,.0f} will be released to your account in 3 days."
+                    f"Payment of ₦{order.amount:,.0f} will be released to your account in 3 days.",
+                    type=NotificationType.payout,
+                    link="/dashboard/payments",
                 )
                 if seller:
                     send_payout_scheduled_email(
@@ -86,7 +88,9 @@ async def auto_confirm_orders():
                     db,
                     order.seller_id,
                     f"⚠️ Order {order.id} was auto-confirmed, but we couldn't find "
-                    f"a bank account on file. Please add one so we can process your payout."
+                    f"a bank account on file. Please add one so we can process your payout.",
+                    type=NotificationType.payout,
+                    link="/dashboard/profile",
                 )
                 if seller:
                     send_bank_account_needed_email(
@@ -157,7 +161,9 @@ def expire_stale_booking_requests():
                 db,
                 booking.client_id,
                 f"Your booking request for {service_title} wasn't accepted in time and has been "
-                f"automatically cancelled. No payment was taken."
+                f"automatically cancelled. No payment was taken.",
+                type=NotificationType.booking,
+                link="/dashboard/bookings",
             )
 
             # Notify provider
@@ -165,7 +171,9 @@ def expire_stale_booking_requests():
                 db,
                 booking.provider_id,
                 f"You missed a booking request for {service_title} — it expired after 72 hours "
-                f"with no response."
+                f"with no response.",
+                type=NotificationType.booking,
+                link="/dashboard/bookings",
             )
 
         db.commit()

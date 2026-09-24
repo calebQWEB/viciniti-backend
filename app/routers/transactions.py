@@ -1,16 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
 from app.models.order import Order
 from app.database import get_db
 from app.schemas.transaction import TransactionResponse
 from app.services.transaction_service import (
-    get_user_transactions, get_transaction,
+    get_transaction_stats, get_user_transactions, get_transaction,
     initiate_payment, verify_payment,
     update_transaction_status, create_transaction
 )
 from app.services.notification_service import create_notification
 from app.models.transaction import TransactionStatus, TransactionType, Transaction
-from app.models.notification import Notification
+from app.models.notification import Notification, NotificationType
 from app.models.user import User
 from app.schemas.transaction import TransactionCreate
 from app.utils.security import get_current_user
@@ -42,37 +42,27 @@ class FlutterwaveWebhookPayload(BaseModel):
 
 # Helper function for notification deduplication
 def create_notification_deduplicated(
-    db: Session,
-    user_id: UUID,
-    message: str,
-    transaction_reference: str,
-    time_window_seconds: int = 10
+        db: Session,
+        user_id: UUID,
+        message: str,
+        transaction_reference: str,
+        time_window_seconds: int = 10,
+        type: Optional[NotificationType] = None,
+        link: Optional[str] = None,
 ) -> bool:
-    """
-    Create a notification only if a similar one doesn't already exist.
-    
-    Deduplication logic:
-    - Check if notification with similar message exists
-    - Only check within the last time_window_seconds
-    - Prevents duplicate notifications from webhook + verify racing
-    
-    Returns: True if notification was created, False if deduplicated
-    """
     cutoff_time = datetime.utcnow() - timedelta(seconds=time_window_seconds)
-    
-    # Check for existing notification with similar content
+
     existing = db.query(Notification).filter(
         Notification.user_id == user_id,
         Notification.created_at >= cutoff_time,
-        Notification.message.ilike(f"%payment%successful%")  # Match pattern
+        Notification.message.ilike(f"%payment%successful%")
     ).first()
-    
+
     if existing:
         print(f"ℹ️  Notification deduplication: Skipped for user {user_id} (already notified)")
         return False
-    
-    # No recent notification found, create new one
-    create_notification(db, user_id, message)
+
+    create_notification(db, user_id, message, type=type, link=link)
     return True
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
@@ -85,12 +75,25 @@ class PaymentVerifyRequest(BaseModel):
     reference: str
 
 # Get all transactions for current user
-@router.get("/", response_model=List[TransactionResponse])
+@router.get("/")
 def get_all(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=50),
+    type: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    return get_user_transactions(db, current_user["sub"])
+    return get_user_transactions(
+        db, current_user["sub"], page=page, limit=limit, type_filter=type, status_filter=status
+    )
+
+@router.get("/stats")
+def stats(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return get_transaction_stats(db, current_user["sub"])
 
 # Get a single transaction
 @router.get("/{transaction_id}", response_model=TransactionResponse)
@@ -189,7 +192,9 @@ async def verify(
                     order.seller_id,
                     f"Payment received for your listing! New order from buyer.",
                     verify_data.reference,
-                    time_window_seconds=10
+                    time_window_seconds=10,
+                    type=NotificationType.order,
+                    link="/dashboard/sales",
                 )
 
         create_notification_deduplicated(
@@ -197,7 +202,9 @@ async def verify(
             transaction.user_id,
             "Your payment was successful! 🎉",
             verify_data.reference,
-            time_window_seconds=10
+            time_window_seconds=10,
+            type=NotificationType.payment,
+            link="/dashboard/payments",
         )
         return {"status": "success", "message": "Payment verified successfully"}
     else:
@@ -369,7 +376,9 @@ async def flutterwave_webhook(
                     order.seller_id,
                     f"Payment received! 🎉 Buyer has paid. Complete the work and upload proof.",
                     reference,
-                    time_window_seconds=10
+                    time_window_seconds=10,
+                    type=NotificationType.order,
+                    link="/dashboard/sales",
                 )
         
         # Notify buyer
@@ -378,7 +387,9 @@ async def flutterwave_webhook(
             transaction.user_id,
             "Your payment was successful! 🎉",
             reference,
-            time_window_seconds=10
+            time_window_seconds=10,
+            type=NotificationType.payment,
+            link="/dashboard/payments",
         )
         
         db.commit()

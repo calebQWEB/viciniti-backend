@@ -9,8 +9,9 @@ from uuid import UUID
 import math
 
 def create_listing(db: Session, listing_data: ListingCreate, user_id: UUID):
-    # Check seller has a default bank account before allowing listing creation
     from app.models.bank_account import BankAccount
+    from app.models.category import Category, CategoryType
+
     default_account = db.query(BankAccount).filter(
         BankAccount.user_id == UUID(str(user_id)),
         BankAccount.is_default == True
@@ -22,12 +23,23 @@ def create_listing(db: Session, listing_data: ListingCreate, user_id: UUID):
             detail="You must add a default payout bank account before creating a listing."
         )
 
+    category = db.query(Category).filter(
+        Category.id == listing_data.category_id,
+        Category.type == CategoryType.item,
+        Category.is_active == True
+    ).first()
+    if not category:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid category for a listing."
+        )
+
     new_listing = Listing(
         user_id=UUID(str(user_id)),
         title=listing_data.title,
         description=listing_data.description,
         price=listing_data.price,
-        category=listing_data.category,
+        category_id=listing_data.category_id,
         images=[img.model_dump() for img in listing_data.images or []],
         location=listing_data.location,
         latitude=listing_data.latitude,
@@ -41,14 +53,18 @@ def create_listing(db: Session, listing_data: ListingCreate, user_id: UUID):
 def get_listings(db: Session, category: str = None, location: str = None,
                  latitude: float = None, longitude: float = None,
                  radius_km: float = 50, skip: int = 0, limit: int = 20):
+    from app.models.category import Category
+    from sqlalchemy.orm import joinedload
+
     query = (
         db.query(Listing)
+        .options(joinedload(Listing.category_ref))
         .filter(Listing.status == ListingStatus.active)
         .order_by(Listing.created_at.desc())
     )
 
     if category:
-        query = query.filter(Listing.category == category)
+        query = query.join(Category, Listing.category_id == Category.id).filter(Category.slug == category)
     if location:
         query = query.filter(Listing.location.ilike(f"%{location}%"))
 
@@ -58,7 +74,7 @@ def get_listings(db: Session, category: str = None, location: str = None,
         listings = [
             listing for listing in listings
             if listing.latitude and listing.longitude and
-            _calculate_distance(latitude, longitude, listing.latitude, listing.longitude) <= radius_km
+               _calculate_distance(latitude, longitude, listing.latitude, listing.longitude) <= radius_km
         ]
 
     return listings
@@ -128,14 +144,28 @@ def get_listing_status_counts(db: Session, user_id: UUID):
 def update_listing(db: Session, listing_id: UUID, listing_data: ListingUpdate, user_id: UUID):
     listing = get_listing(db, listing_id)
 
-    # Make sure the listing belongs to the current user
     if listing.user_id != UUID(str(user_id)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to update this listing"
         )
 
-    for field, value in listing_data.model_dump(exclude_unset=True).items():
+    update_data = listing_data.model_dump(exclude_unset=True)
+
+    if "category_id" in update_data:
+        from app.models.category import Category, CategoryType
+        category = db.query(Category).filter(
+            Category.id == update_data["category_id"],
+            Category.type == CategoryType.item,
+            Category.is_active == True
+        ).first()
+        if not category:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid category for a listing."
+            )
+
+    for field, value in update_data.items():
         setattr(listing, field, value)
 
     db.commit()

@@ -19,13 +19,16 @@ class Service(Base):
     title = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     price = Column(Float, nullable=False)
-    category = Column(String, nullable=False)
+    category = Column(String, nullable=True)
     images = Column(ARRAY(JSON), default=[])
     status = Column(Enum(ServiceStatus), default=ServiceStatus.active)
     location = Column(String, nullable=True)
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    category_id = Column(UUID(as_uuid=True), ForeignKey("categories.id"), nullable=True)
+    category_ref = relationship("Category", backref="services")
 
     # Relationships
     owner = relationship("User", backref="services")

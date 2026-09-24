@@ -23,35 +23,33 @@ class Transaction(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True)  # ← links to order or booking
+    order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=True)
     reference = Column(String, unique=True, nullable=False)
     amount = Column(Float, nullable=False)
     fee = Column(Float, nullable=False)
     type = Column(Enum(TransactionType), nullable=False)
     status = Column(Enum(TransactionStatus), default=TransactionStatus.pending)
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     # Chargeback fields
-    chargeback_id = Column(String, nullable=True)  # Flutterwave chargeback ID
-    chargeback_reason = Column(String, nullable=True)  # Reason from bank
-    chargeback_filed_at = Column(DateTime, nullable=True)  # When chargeback was filed
-    chargeback_evidence_notes = Column(String, nullable=True)  # Your response/evidence notes
-    chargeback_evidence_photos = Column(JSON, default=[])  # List of evidence photo URLs
-    chargeback_resolved_at = Column(DateTime, nullable=True)  # When dispute was resolved
-    
+    chargeback_id = Column(String, nullable=True)
+    chargeback_reason = Column(String, nullable=True)
+    chargeback_filed_at = Column(DateTime, nullable=True)
+    chargeback_evidence_notes = Column(String, nullable=True)
+    chargeback_evidence_photos = Column(JSON, default=[])
+    chargeback_resolved_at = Column(DateTime, nullable=True)
+
     # Terms acceptance tracking
     terms_accepted = Column(Boolean, default=True)
-    terms_accepted_at = Column(DateTime, nullable=True)  # When buyer agreed to terms
-    terms_version = Column(String, nullable=True)  # e.g. "v1.0"
+    terms_accepted_at = Column(DateTime, nullable=True)
+    terms_version = Column(String, nullable=True)
 
     user = relationship("User", backref="transactions")
+    order = relationship("Order", backref="transactions")
+
     @property
-    def order(self):
-        if not self.order_id:
+    def order_summary(self):
+        if not self.order:
             return None
-        from app.models.order import Order
-        ord_obj = self._order_ref
-        if not ord_obj:
-            return None
-        title = ord_obj.listing.title if ord_obj.listing else (ord_obj.service.title if ord_obj.service else "Item")
-        return {"id": ord_obj.id, "item_title": title}
+        title = self.order.listing.title if self.order.listing else (self.order.service.title if self.order.service else "Item")
+        return {"id": self.order.id, "item_title": title}

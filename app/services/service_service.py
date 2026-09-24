@@ -9,12 +9,25 @@ import math
 from typing import Optional
 
 def create_service(db: Session, service_data: ServiceCreate, user_id: UUID):
+    from app.models.category import Category, CategoryType
+
+    category = db.query(Category).filter(
+        Category.id == service_data.category_id,
+        Category.type == CategoryType.service,
+        Category.is_active == True
+    ).first()
+    if not category:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid category for a service."
+        )
+
     new_service = Service(
         user_id=UUID(str(user_id)),
         title=service_data.title,
         description=service_data.description,
         price=service_data.price,
-        category=service_data.category,
+        category_id=service_data.category_id,
         images=[img.model_dump() for img in service_data.images or []],
         location=service_data.location,
         latitude=service_data.latitude,
@@ -28,14 +41,18 @@ def create_service(db: Session, service_data: ServiceCreate, user_id: UUID):
 def get_services(db: Session, category: str = None, location: str = None,
                  latitude: float = None, longitude: float = None,
                  radius_km: float = 50, skip: int = 0, limit: int = 20):
+    from app.models.category import Category
+    from sqlalchemy.orm import joinedload
+
     query = (
         db.query(Service)
+        .options(joinedload(Service.category_ref))
         .filter(Service.status == ServiceStatus.active)
         .order_by(Service.created_at.desc())
     )
 
     if category:
-        query = query.filter(Service.category == category)
+        query = query.join(Category, Service.category_id == Category.id).filter(Category.slug == category)
     if location:
         query = query.filter(Service.location.ilike(f"%{location}%"))
 
@@ -45,7 +62,7 @@ def get_services(db: Session, category: str = None, location: str = None,
         services = [
             service for service in services
             if service.latitude and service.longitude and
-            _calculate_distance(latitude, longitude, service.latitude, service.longitude) <= radius_km
+               _calculate_distance(latitude, longitude, service.latitude, service.longitude) <= radius_km
         ]
 
     return services
@@ -123,7 +140,22 @@ def update_service(db: Session, service_id: UUID, service_data: ServiceUpdate, u
             detail="You do not have permission to update this service"
         )
 
-    for field, value in service_data.model_dump(exclude_unset=True).items():
+    update_data = service_data.model_dump(exclude_unset=True)
+
+    if "category_id" in update_data:
+        from app.models.category import Category, CategoryType
+        category = db.query(Category).filter(
+            Category.id == update_data["category_id"],
+            Category.type == CategoryType.service,
+            Category.is_active == True
+        ).first()
+        if not category:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid category for a service."
+            )
+
+    for field, value in update_data.items():
         setattr(service, field, value)
 
     db.commit()

@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
 from fastapi import HTTPException, status
 from app.models.message import Message
+from app.models.notification import NotificationType
 from app.schemas.message import MessageCreate
 from app.services.notification_service import create_notification
 from app.services.email_service import send_new_message_email
@@ -42,7 +43,9 @@ def send_message(db: Session, message_data: MessageCreate, sender_id: UUID):
     create_notification(
         db,
         new_message.receiver_id,
-        f"You have a new message from {sender.name if sender else 'someone'}!"
+        f"You have a new message from {sender.name if sender else 'someone'}!",
+        type=NotificationType.message,
+        link=f"/dashboard/messages?contact={sender_id}",
     )
 
     return new_message

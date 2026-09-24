@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session, joinedload
 from fastapi import HTTPException, status
 from app.models.booking import Booking, BookingStatus
 from app.models.service import Service
+from app.models.notification import NotificationType
 from app.schemas.booking import BookingCreate, BookingUpdate
 from app.services.email_service import send_booking_confirmed_email
 from app.models.user import User
@@ -48,7 +49,9 @@ def create_booking(db: Session, booking_data: BookingCreate, client_id: UUID):
     create_notification(
         db,
         new_booking.provider_id,
-        f"You have a new booking request for {service.title}. Please accept or decline."
+        f"You have a new booking request for {service.title}. Please accept or decline.",
+        type=NotificationType.booking,
+        link="/dashboard/bookings",
     )
 
     return new_booking
@@ -166,7 +169,9 @@ def update_booking(db: Session, booking_id: UUID, booking_data: BookingUpdate, u
             create_notification(
                 db,
                 client.id,
-                f"Your booking for {service.title} was accepted! Complete payment to secure your slot."
+                f"Your booking for {service.title} was accepted! Complete payment to secure your slot.",
+                type=NotificationType.booking,
+                link="/dashboard/bookings",
             )
 
     # Booking was cancelled
@@ -184,7 +189,9 @@ def update_booking(db: Session, booking_id: UUID, booking_data: BookingUpdate, u
                 create_notification(
                     db,
                     client.id,
-                    f"Your booking request for {service.title} was declined by the provider."
+                    f"Your booking request for {service.title} was declined by the provider.",
+                    type=NotificationType.booking,
+                    link="/dashboard/bookings",
                 )
         elif previous_status == BookingStatus.pending and is_client:
             # Client withdrew their own request
@@ -192,7 +199,9 @@ def update_booking(db: Session, booking_id: UUID, booking_data: BookingUpdate, u
                 create_notification(
                     db,
                     booking.provider_id,
-                    f"A booking request for {service.title} was withdrawn by the client."
+                    f"A booking request for {service.title} was withdrawn by the client.",
+                    type=NotificationType.booking,
+                    link="/dashboard/bookings",
                 )
         elif previous_status == BookingStatus.confirmed:
             # Either side cancelled after acceptance, before payment
@@ -201,7 +210,9 @@ def update_booking(db: Session, booking_id: UUID, booking_data: BookingUpdate, u
                 create_notification(
                     db,
                     other_party_id,
-                    f"The booking for {service.title} was cancelled before payment."
+                    f"The booking for {service.title} was cancelled before payment.",
+                    type=NotificationType.booking,
+                    link="/dashboard/bookings",
                 )
 
     return booking
