@@ -6,8 +6,9 @@ from app.services.service_service import (
     create_service, get_service_status_counts, get_services, get_service,
     get_user_services, update_service, delete_service
 )
-from app.utils.security import get_current_user
-from typing import List, Optional
+from app.utils.security import get_current_user, get_optional_user
+from app.utils.geo import mark_owner_view
+from typing import List, Literal, Optional
 from uuid import UUID
 
 router = APIRouter(prefix="/services", tags=["Services"])
@@ -19,21 +20,29 @@ def create(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    return create_service(db, service_data, current_user["sub"])
+    return mark_owner_view(create_service(db, service_data, current_user["sub"]))
 
 # Browse all services with optional filters
 @router.get("/", response_model=List[ServiceResponse])
 def browse(
     category: Optional[str] = Query(None),
     location: Optional[str] = Query(None),
-    latitude: Optional[float] = Query(None),
-    longitude: Optional[float] = Query(None),
-    radius_km: Optional[float] = Query(50),
+    # Free-text search over title and description
+    q: Optional[str] = Query(None, max_length=100),
+    latitude: Optional[float] = Query(None, ge=-90, le=90),
+    longitude: Optional[float] = Query(None, ge=-180, le=180),
+    radius_km: float = Query(50, gt=0, le=500),
+    # Defaults to nearest when a location is given, otherwise newest
+    sort: Optional[Literal["nearest", "newest"]] = Query(None),
     skip: int = Query(0),
     limit: int = Query(20),
     db: Session = Depends(get_db)
 ):
-    return get_services(db, category, location, latitude, longitude, radius_km, skip, limit)
+    return get_services(
+        db, category=category, location=location,
+        latitude=latitude, longitude=longitude, radius_km=radius_km,
+        sort=sort, q=q, skip=skip, limit=limit,
+    )
 
 # Get current user's services
 @router.get("/me")
@@ -57,8 +66,16 @@ def my_services_counts(
 
 # Get a single service by ID
 @router.get("/{service_id}", response_model=ServiceResponse)
-def get_one(service_id: UUID, db: Session = Depends(get_db)):
-    return get_service(db, service_id)
+def get_one(
+    service_id: UUID,
+    current_user: Optional[dict] = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+):
+    service = get_service(db, service_id)
+    # Owners (e.g. the edit page) get exact coordinates; everyone else gets blurred ones
+    if current_user and str(service.user_id) == current_user.get("sub"):
+        mark_owner_view(service)
+    return service
 
 # Update a service
 @router.put("/{service_id}", response_model=ServiceResponse)
@@ -68,7 +85,7 @@ def update(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    return update_service(db, service_id, service_data, current_user["sub"])
+    return mark_owner_view(update_service(db, service_id, service_data, current_user["sub"]))
 
 # Delete a service
 @router.delete("/{service_id}")

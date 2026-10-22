@@ -10,3 +10,4 @@ from app.models.password_reset_token import PasswordResetToken
 from app.models.bank_account import BankAccount
 from app.models.review import Review
 from app.models.category import Category
+from app.models.app_log import AppLog

@@ -11,7 +11,7 @@ cloudinary.config(
     secure=True
 )
 
-def upload_image(file_bytes: bytes, user_id: str, folder: str = "viciniti/listings") -> dict:
+def upload_image(file_bytes: bytes, user_id: str, folder: str = "junction/listings") -> dict:
     """
     Uploads an image to Cloudinary and returns both the secure URL and public_id.
     - file_bytes: raw image bytes

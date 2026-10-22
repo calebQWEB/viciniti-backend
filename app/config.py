@@ -1,6 +1,9 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
+# Platform name used in emails, payment labels and the API docs
+BRAND_NAME = "Junction"
+
 class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
@@ -29,15 +32,23 @@ class Settings(BaseSettings):
 
     # Resend Email api
     RESEND_API_KEY: str
-    RESEND_FROM_EMAIL: str = "Viciniti <onboarding@resend.dev>"
+    RESEND_FROM_EMAIL: str = f"{BRAND_NAME} <onboarding@resend.dev>"
     FRONTEND_URL: str
 
     class Config:
         env_file = ".env"
 
 # Platform fee configuration
-PLATFORM_FEE_PERCENTAGE = 0.05
+PLATFORM_FEE_PERCENTAGE = 0.04
+PLATFORM_FEE_CAP = 30000
+
+def calculate_platform_fee(amount: float) -> float:
+    return round(min(amount * PLATFORM_FEE_PERCENTAGE, PLATFORM_FEE_CAP), 2)
+
 CHARGEBACK_FEE = 2500
+
+# Unpaid orders hold a listing for this long; the scheduler cancels them after it
+UNPAID_ORDER_MINUTES = 30
 
 @lru_cache()
 def get_settings():

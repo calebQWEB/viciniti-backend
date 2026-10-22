@@ -1,27 +1,18 @@
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.models.listing import Listing, ListingStatus
 from app.schemas.listing import ListingCreate, ListingUpdate
+from app.utils.geo import distance_km, within_radius, attach_distances
+from app.services.log_service import log_event
 from uuid import UUID
 import math
 
 def create_listing(db: Session, listing_data: ListingCreate, user_id: UUID):
-    from app.models.bank_account import BankAccount
+    # No payout account needed to list; payouts wait until one is added (see get_payout_blocked)
     from app.models.category import Category, CategoryType
-
-    default_account = db.query(BankAccount).filter(
-        BankAccount.user_id == UUID(str(user_id)),
-        BankAccount.is_default == True
-    ).first()
-
-    if not default_account:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You must add a default payout bank account before creating a listing."
-        )
 
     category = db.query(Category).filter(
         Category.id == listing_data.category_id,
@@ -48,11 +39,14 @@ def create_listing(db: Session, listing_data: ListingCreate, user_id: UUID):
     db.add(new_listing)
     db.commit()
     db.refresh(new_listing)
+    log_event("info", "listing", "listing.created", "Listing created",
+              details={"listing_id": new_listing.id, "price": new_listing.price}, user_id=user_id)
     return new_listing
 
 def get_listings(db: Session, category: str = None, location: str = None,
                  latitude: float = None, longitude: float = None,
-                 radius_km: float = 50, skip: int = 0, limit: int = 20):
+                 radius_km: float = 50, sort: str = None, q: str = None,
+                 skip: int = 0, limit: int = 20):
     from app.models.category import Category
     from sqlalchemy.orm import joinedload
 
@@ -60,24 +54,34 @@ def get_listings(db: Session, category: str = None, location: str = None,
         db.query(Listing)
         .options(joinedload(Listing.category_ref))
         .filter(Listing.status == ListingStatus.active)
-        .order_by(Listing.created_at.desc())
     )
 
     if category:
         query = query.join(Category, Listing.category_id == Category.id).filter(Category.slug == category)
     if location:
         query = query.filter(Listing.location.ilike(f"%{location}%"))
+    if q and q.strip():
+        term = q.strip()
+        query = query.filter(or_(
+            Listing.title.icontains(term, autoescape=True),
+            Listing.description.icontains(term, autoescape=True),
+        ))
 
-    listings = query.offset(skip).limit(limit).all()
+    if latitude is None or longitude is None:
+        return query.order_by(Listing.created_at.desc()).offset(skip).limit(limit).all()
 
-    if latitude and longitude:
-        listings = [
-            listing for listing in listings
-            if listing.latitude and listing.longitude and
-               _calculate_distance(latitude, longitude, listing.latitude, listing.longitude) <= radius_km
-        ]
+    # Radius filter runs in SQL before paging, so every page is full
+    distance = distance_km(Listing.latitude, Listing.longitude, latitude, longitude)
+    query = (
+        query.filter(*within_radius(Listing.latitude, Listing.longitude, latitude, longitude, radius_km))
+        .add_columns(distance)
+    )
+    if sort == "newest":
+        query = query.order_by(Listing.created_at.desc())
+    else:
+        query = query.order_by(distance, Listing.created_at.desc())
 
-    return listings
+    return attach_distances(query.offset(skip).limit(limit).all())
 
 def get_user_listings(
     db: Session,
@@ -184,13 +188,6 @@ def delete_listing(db: Session, listing_id: UUID, user_id: UUID):
 
     db.delete(listing)
     db.commit()
+    log_event("info", "listing", "listing.deleted", "Listing deleted",
+              details={"listing_id": listing_id}, user_id=user_id)
     return {"message": "Listing deleted successfully"}
-
-def _calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    # Haversine formula - calculates distance between two coordinates in km
-    R = 6371
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    return R * c

@@ -6,6 +6,7 @@ from app.services.auth_services import register_user, login_user, hash_password
 from app.models.user import User
 from app.models.password_reset_token import PasswordResetToken
 from app.services.email_service import send_password_reset_email
+from app.services.log_service import log_event
 from datetime import datetime, timedelta
 import secrets
 from pydantic import BaseModel
@@ -72,6 +73,7 @@ def forgot_password(
         name=user.name,
         reset_token=token
     )
+    log_event("info", "auth", "auth.password_reset_requested", "Password reset link sent", user_id=user.id)
 
     return {"message": "If that email exists, a reset link has been sent."}
 
@@ -116,5 +118,6 @@ def reset_password(
     reset_token.used = True
 
     db.commit()
+    log_event("info", "auth", "auth.password_reset", "Password reset with emailed link", user_id=user.id)
 
     return {"message": "Password reset successfully. You can now log in."}

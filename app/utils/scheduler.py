@@ -1,22 +1,29 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.orm import Session
+from app.config import UNPAID_ORDER_MINUTES
 from app.database import SessionLocal
 from app.models.order import Order, OrderStatus
 from app.models.user import User
 from app.models.booking import Booking, BookingStatus
 from app.models.service import Service
+from app.models.notification import NotificationType
 from datetime import datetime, timedelta
 from app.services.payment_service import initiate_seller_payout, check_seller_payout_eligibility
 from app.services.notification_service import create_notification
 from app.services.email_service import send_payout_scheduled_email, send_bank_account_needed_email
+from app.services.log_service import log_event
 import asyncio
+import logging
+import traceback
+
+logger = logging.getLogger("junction")
 
 scheduler = AsyncIOScheduler()
 
 def cancel_stale_orders():
     db: Session = SessionLocal()
     try:
-        cutoff = datetime.utcnow() - timedelta(minutes=30)
+        cutoff = datetime.utcnow() - timedelta(minutes=UNPAID_ORDER_MINUTES)
         stale_orders = db.query(Order).filter(
             Order.status == OrderStatus.pending,
             Order.created_at < cutoff
@@ -24,17 +31,14 @@ def cancel_stale_orders():
 
         for order in stale_orders:
             order.status = OrderStatus.cancelled
-            # print(f"🕒 Cancelled stale order {order.id}")
-
-        cutoff = datetime.utcnow() - timedelta(minutes=30)
-        # print(f"🕒 Cutoff time: {cutoff}")
-        # print(f"🕒 Current UTC time: {datetime.utcnow()}")
-        # print(f"🕒 Found {len(stale_orders)} stale orders")
 
         db.commit()
-        # print(f"✅ Stale order cleanup complete. Cancelled {len(stale_orders)} orders.")
+        for order in stale_orders:
+            log_event("info", "order", "order.expired", "Unpaid order cancelled after the payment window",
+                      details={"order_id": order.id, "minutes": UNPAID_ORDER_MINUTES}, user_id=order.buyer_id)
     except Exception as e:
-        print(f"❌ Stale order cleanup error: {e}")
+        log_event("error", "scheduler", "scheduler.job_failed", f"Scheduled job 'cancel_stale_orders' crashed: {type(e).__name__}: {e}",
+                  details={"job": "cancel_stale_orders"}, traceback=traceback.format_exc())
     finally:
         db.close()
 
@@ -43,6 +47,7 @@ def start_scheduler():
     scheduler.add_job(auto_confirm_orders, "interval", hours=12, misfire_grace_time=None, next_run_time=datetime.utcnow())
     scheduler.add_job(process_due_payouts, "interval", hours=1, misfire_grace_time=None, next_run_time=datetime.utcnow())
     scheduler.add_job(expire_stale_booking_requests, "interval", hours=1, misfire_grace_time=None, next_run_time=datetime.utcnow())
+    scheduler.add_job(cleanup_logs, "interval", hours=24, misfire_grace_time=None, next_run_time=datetime.utcnow())
     scheduler.start()
 
 async def auto_confirm_orders():
@@ -57,9 +62,12 @@ async def auto_confirm_orders():
         for order in stale_orders:
             order.status = OrderStatus.completed
             order.buyer_accepted_at = datetime.utcnow()
-            # print(f"🕒 Auto-confirmed order {order.id}")
 
         db.commit()
+        for order in stale_orders:
+            log_event("info", "order", "order.auto_confirmed",
+                      "Order confirmed automatically: the buyer didn't respond within 3 days",
+                      details={"order_id": order.id, "amount": order.amount}, user_id=order.buyer_id)
 
         # Check payout eligibility and set delay for each auto-confirmed order
         for order in stale_orders:
@@ -68,6 +76,9 @@ async def auto_confirm_orders():
 
             if is_eligible:
                 order.payout_due_at = datetime.utcnow() + timedelta(days=3)
+                log_event("info", "payout", "payout.scheduled", "Seller payout scheduled",
+                          details={"order_id": order.id, "amount": order.amount, "due_at": order.payout_due_at},
+                          user_id=order.seller_id)
                 create_notification(
                     db,
                     order.seller_id,
@@ -84,6 +95,9 @@ async def auto_confirm_orders():
                         order_id=str(order.id)
                     )
             else:
+                log_event("warning", "payout", "payout.blocked_no_bank",
+                          "Payout due but the seller has no bank account",
+                          details={"order_id": order.id, "amount": order.amount}, user_id=order.seller_id)
                 create_notification(
                     db,
                     order.seller_id,
@@ -101,10 +115,9 @@ async def auto_confirm_orders():
                     )
 
         db.commit()
-
-        # print(f"✅ Auto-confirmation complete. Confirmed {len(stale_orders)} orders.")
     except Exception as e:
-        print(f"❌ Auto-confirmation error: {e}")
+        log_event("error", "scheduler", "scheduler.job_failed", f"Scheduled job 'auto_confirm_orders' crashed: {type(e).__name__}: {e}",
+                  details={"job": "auto_confirm_orders"}, traceback=traceback.format_exc())
     finally:
         db.close()
 
@@ -127,14 +140,15 @@ async def process_due_payouts():
             if success:
                 order.payout_due_at = None  # Prevent reprocessing
                 order.payout_completed_at = datetime.utcnow()
-                # print(f"✅ Payout released for order {order.id}")
             else:
-                print(f"❌ Payout failed for order {order.id}, will retry next run")
+                # initiate_seller_payout has logged why; the order stays due and is retried next run
+                logger.info("Payout for order %s not sent, will retry next run", order.id)
 
         db.commit()
 
     except Exception as e:
-        print(f"❌ process_due_payouts error: {e}")
+        log_event("critical", "scheduler", "scheduler.payouts_failed", f"Scheduled job 'process_due_payouts' crashed: {type(e).__name__}: {e}",
+                  details={"job": "process_due_payouts"}, traceback=traceback.format_exc())
     finally:
         db.close()
 
@@ -151,6 +165,9 @@ def expire_stale_booking_requests():
             booking.status = BookingStatus.cancelled
 
         db.commit()
+        for booking in stale_bookings:
+            log_event("info", "booking", "booking.expired", "Booking request expired: no reply within 72 hours",
+                      details={"booking_id": booking.id}, user_id=booking.client_id)
 
         for booking in stale_bookings:
             service = db.query(Service).filter(Service.id == booking.service_id).first()
@@ -173,12 +190,27 @@ def expire_stale_booking_requests():
                 f"You missed a booking request for {service_title} — it expired after 72 hours "
                 f"with no response.",
                 type=NotificationType.booking,
-                link="/dashboard/bookings",
+                link=f"/dashboard/bookings?tab=requests&highlight={booking.id}",
             )
 
         db.commit()
 
     except Exception as e:
-        print(f"❌ Booking expiry error: {e}")
+        log_event("error", "scheduler", "scheduler.job_failed", f"Scheduled job 'expire_stale_booking_requests' crashed: {type(e).__name__}: {e}",
+                  details={"job": "expire_stale_booking_requests"}, traceback=traceback.format_exc())
+    finally:
+        db.close()
+
+def cleanup_logs():
+    """Daily: drop old routine log entries and old resolved issues (unresolved issues are kept)."""
+    from app.services.log_service import cleanup_old_logs
+    db: Session = SessionLocal()
+    try:
+        deleted = cleanup_old_logs(db)
+        if deleted:
+            logger.info("Removed %s old log entries", deleted)
+    except Exception as e:
+        log_event("error", "scheduler", "scheduler.job_failed", f"Scheduled job 'cleanup_logs' crashed: {type(e).__name__}: {e}",
+                  details={"job": "cleanup_logs"}, traceback=traceback.format_exc())
     finally:
         db.close()

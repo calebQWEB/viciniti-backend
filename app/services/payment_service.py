@@ -4,11 +4,14 @@ Service for handling seller payouts.
 Handles payout initiation and management for sellers.
 """
 
+import logging
+import traceback
+
 from sqlalchemy.orm import Session
 from uuid import UUID
 import httpx
 from datetime import datetime, timedelta
-from app.config import get_settings
+from app.config import BRAND_NAME, get_settings
 from app.models.order import Order, OrderStatus
 from app.models.transaction import Transaction, TransactionType, TransactionStatus
 from app.schemas.transaction import TransactionCreate
@@ -17,10 +20,12 @@ from app.services.notification_service import create_notification
 from app.services.email_service import send_payout_initiated_email, send_payout_scheduled_email
 from app.services.transaction_service import create_transaction
 from app.models.user import User
-from uuid import UUID
+from app.models.notification import NotificationType
+from app.services.log_service import log_event
 import uuid
 
 settings = get_settings()
+logger = logging.getLogger("junction")
 
 async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
     try:
@@ -28,7 +33,8 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
 
         order = db.query(Order).filter(Order.id == order_id).first()
         if not order:
-            print(f"❌ Order not found: {order_id}")
+            log_event("error", "payout", "payout.failed", "Payout attempted for an order that doesn't exist",
+                      details={"order_id": order_id})
             return False
 
         bank_account = db.query(BankAccount).filter(
@@ -37,7 +43,10 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
         ).first()
 
         if not bank_account:
-            print(f"❌ Seller {order.seller_id} has no default bank account")
+            log_event("warning", "payout", "payout.blocked_no_bank",
+                      "Payout due but the seller has no bank account",
+                      details={"order_id": order_id, "amount": order.amount - order.fee},
+                      user_id=order.seller_id)
             return False
 
         payout_amount = order.amount - order.fee
@@ -51,7 +60,7 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
                     "account_number": bank_account.account_number,
                     "amount": payout_amount,
                     "currency": "NGN",
-                    "narration": f"Viciniti payout for order {order_id}",
+                    "narration": f"{BRAND_NAME} payout for order {order_id}",
                     "reference": reference,
                 },
                 headers={
@@ -63,7 +72,10 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
         data = response.json()
 
         if data.get("status") != "success":
-            print(f"❌ Payout failed for order {order_id}: {data.get('message')}")
+            log_event("critical", "payout", "payout.failed", "Flutterwave rejected a seller payout",
+                      details={"order_id": order_id, "amount": payout_amount, "reference": reference,
+                               "flutterwave_message": data.get("message")},
+                      user_id=order.seller_id)
             return False
 
         # Record this payout as a Transaction
@@ -78,6 +90,9 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
         transaction = db.query(Transaction).filter(Transaction.reference == reference).first()
         transaction.status = TransactionStatus.success
         db.commit()
+        log_event("info", "payout", "payout.sent", "Seller payout sent",
+                  details={"order_id": order_id, "amount": payout_amount, "reference": reference},
+                  user_id=order.seller_id)
 
         create_notification(
             db,
@@ -99,7 +114,8 @@ async def initiate_seller_payout(db: Session, order_id: UUID) -> bool:
         return True
 
     except Exception as e:
-        print(f"❌ initiate_seller_payout error: {e}")
+        log_event("critical", "payout", "payout.failed", f"Seller payout crashed: {type(e).__name__}: {e}",
+                  details={"order_id": order_id}, traceback=traceback.format_exc())
         return False
     
 async def check_seller_payout_eligibility(db: Session, order_id: UUID) -> bool:
@@ -112,7 +128,7 @@ async def check_seller_payout_eligibility(db: Session, order_id: UUID) -> bool:
 
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
-        print(f"❌ Order not found: {order_id}")
+        logger.debug("Payout eligibility check for unknown order %s", order_id)
         return False
 
     bank_account = db.query(BankAccount).filter(
@@ -120,11 +136,8 @@ async def check_seller_payout_eligibility(db: Session, order_id: UUID) -> bool:
         BankAccount.is_default == True
     ).first()
 
-    if not bank_account:
-        print(f"❌ Seller {order.seller_id} has no default bank account")
-        return False
-
-    return True
+    # The caller logs payout.blocked_no_bank when this is False
+    return bank_account is not None
 
 def reschedule_stuck_payouts(db: Session, seller_id: UUID):
     """

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
-from app.models.order import Order
+from app.models.order import Order, OrderStatus
+from app.config import UNPAID_ORDER_MINUTES
 from app.database import get_db
 from app.schemas.transaction import TransactionResponse
 from app.services.transaction_service import (
@@ -14,20 +15,25 @@ from app.models.notification import Notification, NotificationType
 from app.models.user import User
 from app.schemas.transaction import TransactionCreate
 from app.utils.security import get_current_user
-from app.config import PLATFORM_FEE_PERCENTAGE
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel
 from datetime import datetime, timedelta
-import hashlib
 import hmac
 import json
+import logging
+import traceback
+
+from app.services.log_service import log_event
+
+logger = logging.getLogger("junction")
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 
 class PaymentInitRequest(BaseModel):
-    amount: float
     order_id: str
+    # Ignored: the charge always uses the order's own amount. Kept so existing clients still validate.
+    amount: Optional[float] = None
 
 class PaymentVerifyRequest(BaseModel):
     reference: str
@@ -59,20 +65,69 @@ def create_notification_deduplicated(
     ).first()
 
     if existing:
-        print(f"ℹ️  Notification deduplication: Skipped for user {user_id} (already notified)")
+        logger.debug("Notification deduplication: skipped for user %s", user_id)
         return False
 
     create_notification(db, user_id, message, type=type, link=link)
     return True
 
-router = APIRouter(prefix="/transactions", tags=["Transactions"])
+LATE_PAYMENT_MESSAGE = (
+    "We received your payment, but this order had already expired or been cancelled. "
+    "Our team will refund you. You don't need to do anything."
+)
 
-class PaymentInitRequest(BaseModel):
-    amount: float
-    order_id: str
+def settle_paid_order(db: Session, transaction: Transaction, reference: str, seller_message: str,
+                      source: str) -> str:
+    """Apply a payment Flutterwave has confirmed to its order.
 
-class PaymentVerifyRequest(BaseModel):
-    reference: str
+    Returns "paid", "already_paid", "needs_refund" (paid after the order expired or was
+    cancelled, so there's nothing to sell) or "no_order".
+    """
+    from app.models.listing import Listing, ListingStatus
+
+    order = (
+        db.query(Order).filter(Order.id == transaction.order_id).first()
+        if transaction.order_id else None
+    )
+    if not order:
+        return "no_order"
+
+    if order.status != OrderStatus.pending:
+        if order.status in (OrderStatus.cancelled, OrderStatus.refunded):
+            # Money was taken for an order we can't fulfil; flag it rather than reviving the order
+            log_event("critical", "payment", "payment.needs_refund",
+                      "Payment arrived for an expired or cancelled order and needs a manual refund",
+                      details={"order_id": order.id, "reference": reference, "amount": transaction.amount,
+                               "order_status": order.status.value, "source": source},
+                      user_id=transaction.user_id)
+            create_notification(
+                db, transaction.user_id, LATE_PAYMENT_MESSAGE,
+                type=NotificationType.payment, link="/dashboard/payments",
+            )
+            return "needs_refund"
+        return "already_paid"
+
+    listing = db.query(Listing).filter(Listing.id == order.listing_id).first()
+    if listing:
+        listing.status = ListingStatus.sold
+
+    # Paid, awaiting seller fulfillment
+    order.status = OrderStatus.paid
+    db.commit()
+
+    create_notification_deduplicated(
+        db,
+        order.seller_id,
+        seller_message,
+        reference,
+        time_window_seconds=10,
+        type=NotificationType.order,
+        link=f"/dashboard/purchases?tab=sales&highlight={order.id}",
+    )
+    log_event("info", "payment", "payment.confirmed", "Payment confirmed",
+              details={"order_id": order.id, "reference": reference, "amount": order.amount, "source": source},
+              user_id=transaction.user_id)
+    return "paid"
 
 # Get all transactions for current user
 @router.get("/")
@@ -113,27 +168,51 @@ async def initiate(
 ):
     user = db.query(User).filter(User.id == current_user["sub"]).first()
 
-    result = await initiate_payment(
-        amount=payment_data.amount,
-        email=user.email,
-        order_id=payment_data.order_id
-    )
-
+    # Check the order before asking Flutterwave for a payment link
     order = db.query(Order).filter(Order.id == payment_data.order_id).first()
-    if not order:
+    # Someone else's order looks the same as a missing one
+    if not order or str(order.buyer_id) != str(user.id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
+    if order.status != OrderStatus.pending:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This order can no longer be paid for."
+        )
+    if order.created_at < datetime.utcnow() - timedelta(minutes=UNPAID_ORDER_MINUTES):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This order has expired. Please start your purchase again."
+        )
+    if order.listing_id:
+        from app.models.listing import Listing, ListingStatus
+        listing = db.query(Listing).filter(Listing.id == order.listing_id).first()
+        if not listing or listing.status != ListingStatus.active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This item has already been sold."
+            )
+
+    # Charge the order's own amount, never a figure sent by the browser
+    result = await initiate_payment(
+        amount=order.amount,
+        email=user.email,
+        order_id=payment_data.order_id
+    )
 
     create_transaction(db, TransactionCreate(
         user_id=user.id,
         reference=result["reference"],
-        amount=payment_data.amount,
+        amount=order.amount,
         fee=order.fee,
         type=TransactionType.payment,
         order_id=payment_data.order_id,
     ))
+    log_event("info", "payment", "payment.started", "Buyer opened the payment page",
+              details={"order_id": order.id, "reference": result["reference"], "amount": order.amount},
+              user_id=user.id)
 
     return result
 
@@ -165,37 +244,13 @@ async def verify(
             TransactionStatus.success
         )
 
-        # Use order_id from transaction to mark listing as sold
-        if transaction.order_id:
-            from app.models.order import Order, OrderStatus
-            from app.models.listing import Listing, ListingStatus
-
-            order = db.query(Order).filter(
-                Order.id == transaction.order_id
-            ).first()
-
-            if order:
-                # Mark listing as sold
-                listing = db.query(Listing).filter(
-                    Listing.id == order.listing_id
-                ).first()
-                if listing:
-                    listing.status = ListingStatus.sold
-
-                # Mark order as paid — awaiting seller fulfillment
-                order.status = OrderStatus.paid
-                db.commit()
-                
-                # Notify seller that payment was received
-                create_notification_deduplicated(
-                    db,
-                    order.seller_id,
-                    f"Payment received for your listing! New order from buyer.",
-                    verify_data.reference,
-                    time_window_seconds=10,
-                    type=NotificationType.order,
-                    link="/dashboard/sales",
-                )
+        outcome = settle_paid_order(
+            db, transaction, verify_data.reference,
+            "Payment received for your listing! New order from buyer.",
+            source="redirect",
+        )
+        if outcome == "needs_refund":
+            return {"status": "needs_refund", "message": LATE_PAYMENT_MESSAGE}
 
         create_notification_deduplicated(
             db,
@@ -241,49 +296,26 @@ async def flutterwave_webhook(
     """
     Handle Flutterwave webhook events for payment updates.
     Flutterwave sends this when payment status changes on their end.
-    
-    Webhook signature is verified using HMAC-SHA256 to ensure
-    the request actually came from Flutterwave (not a fake request).
+
+    Flutterwave v3 proves a webhook is genuine by sending the dashboard "Secret hash"
+    in the verif-hash header. To test locally (e.g. chargebacks), send that header
+    with the value of FLUTTERWAVE_HASH_KEY.
     """
     from app.config import get_settings
-    from app.models.order import Order, OrderStatus
-    from app.models.listing import Listing, ListingStatus
-    
+
     settings = get_settings()
-    
+
+    # Reject anything that doesn't carry our secret hash (constant-time comparison)
+    received_hash = request.headers.get("verif-hash", "")
+    if not received_hash or not hmac.compare_digest(received_hash, settings.FLUTTERWAVE_HASH_KEY):
+        log_event("warning", "webhook", "webhook.rejected",
+                  "Webhook rejected: missing or wrong verif-hash header",
+                  details={"hash_present": bool(received_hash)},
+                  request_method=request.method, request_path=request.url.path, status_code=401)
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
     try:
-        # Get raw request body for signature verification
         body = await request.body()
-        
-        # Get signature from Flutterwave header
-        # signature = request.headers.get("X-Flutterwave-Signature")
-        
-        # if not signature:
-        #     print("⚠️  Webhook received without signature header")
-        #     raise HTTPException(
-        #         status_code=403,
-        #         detail="Missing X-Flutterwave-Signature header"
-        #     )
-        
-        # # Verify signature using Flutterwave's hash key
-        # # Flutterwave uses: HMAC-SHA256(body, FLUTTERWAVE_HASH_KEY)
-        # expected_signature = hmac.new(
-        #     settings.FLUTTERWAVE_HASH_KEY.encode(),
-        #     body,
-        #     hashlib.sha256
-        # ).hexdigest()
-        
-        # # Compare signatures (use constant-time comparison to prevent timing attacks)
-        # if not hmac.compare_digest(signature, expected_signature):
-        #     print(f"❌ Invalid webhook signature. Expected: {expected_signature}, Got: {signature}")
-        #     raise HTTPException(
-        #         status_code=403,
-        #         detail="Invalid webhook signature"
-        #     )
-        
-        # print("✅ Webhook signature verified")
-        
-        # Signature verified, parse the JSON payload
         payload_dict = json.loads(body.decode())
         payload = FlutterwaveWebhookPayload(**payload_dict)
         
@@ -300,7 +332,7 @@ async def flutterwave_webhook(
             dispute_reason = dispute_data.get("dispute_reason", "Unknown reason")
             dispute_status = dispute_data.get("dispute_status", "").lower()
             
-            print(f"🔔 Chargeback event received for {reference}: {dispute_status}")
+            logger.info("Chargeback event received for %s: %s", reference, dispute_status)
             
             # Route to appropriate handler based on status
             if dispute_status == "under_investigation":
@@ -325,7 +357,9 @@ async def flutterwave_webhook(
         reference = payload.data.get("tx_ref")
         
         if not reference:
-            print("⚠️  Webhook missing transaction reference (tx_ref)")
+            log_event("warning", "webhook", "webhook.missing_reference",
+                      "Successful-payment webhook without a transaction reference",
+                      details={"event": payload.event})
             return {"status": "error", "message": "No transaction reference in payload"}
         
         # Find transaction by reference
@@ -338,62 +372,44 @@ async def flutterwave_webhook(
             # 1. Webhook arrived before our initiate_payment completed
             # 2. Reference doesn't match our pattern
             # 3. Transaction was deleted (shouldn't happen)
-            print(f"⚠️  Webhook for unknown transaction reference: {reference}")
+            log_event("warning", "webhook", "webhook.unknown_reference",
+                      "Webhook for a payment reference we don't recognise",
+                      details={"reference": reference, "event": payload.event})
             return {"status": "error", "message": "Transaction not found"}
         
         # Idempotency check: If already processed, return success
         if transaction.status == TransactionStatus.success:
-            print(f"ℹ️  Transaction {reference} already marked as success, skipping")
+            logger.debug("Transaction %s already marked as success, skipping", reference)
             return {"status": "success", "message": "Already processed"}
         
-        # Update transaction status to success
-        transaction.status = TransactionStatus.success
-        
-        # Update associated order if exists
-        if transaction.order_id:
-            order = db.query(Order).filter(
-                Order.id == transaction.order_id
-            ).first()
-            
-            if order and order.status == OrderStatus.pending:
-                # Mark listing as sold
-                listing = db.query(Listing).filter(
-                    Listing.id == order.listing_id
-                ).first()
-                if listing:
-                    listing.status = ListingStatus.sold
+        # Second layer: confirm with Flutterwave's API (status, amount, currency) before trusting it
+        if not await verify_payment(reference, transaction.order_id, db):
+            # verify_payment has already logged payment.unconfirmed with the reason
+            logger.info("Webhook for %s not confirmed by Flutterwave's API, ignoring", reference)
+            return {"status": "ignored", "message": "Payment not confirmed by Flutterwave"}
 
-                # Mark order as paid — awaiting seller fulfillment
-                order.status = OrderStatus.paid
-                
-                db.commit()
-                
-                print(f"✅ Payment confirmed for order {order.id}, awaiting seller fulfillment")
-                
-                # Notify seller that payment was received
-                create_notification_deduplicated(
-                    db,
-                    order.seller_id,
-                    f"Payment received! 🎉 Buyer has paid. Complete the work and upload proof.",
-                    reference,
-                    time_window_seconds=10,
-                    type=NotificationType.order,
-                    link="/dashboard/sales",
-                )
-        
-        # Notify buyer
-        create_notification_deduplicated(
-            db,
-            transaction.user_id,
-            "Your payment was successful! 🎉",
-            reference,
-            time_window_seconds=10,
-            type=NotificationType.payment,
-            link="/dashboard/payments",
-        )
-        
+        transaction.status = TransactionStatus.success
         db.commit()
-        print(f"✅ Webhook processed successfully for transaction {reference}")
+
+        outcome = settle_paid_order(
+            db, transaction, reference,
+            "Payment received! 🎉 Buyer has paid. Complete the work and upload proof.",
+            source="webhook",
+        )
+
+        if outcome != "needs_refund":
+            create_notification_deduplicated(
+                db,
+                transaction.user_id,
+                "Your payment was successful! 🎉",
+                reference,
+                time_window_seconds=10,
+                type=NotificationType.payment,
+                link="/dashboard/payments",
+            )
+
+        db.commit()
+        logger.debug("Webhook processed for transaction %s", reference)
         
         return {"status": "success", "message": "Webhook processed"}
     
@@ -401,7 +417,10 @@ async def flutterwave_webhook(
         # Re-raise HTTP exceptions (like 403 for invalid signature)
         raise
     except Exception as e:
-        print(f"❌ Error processing webhook: {str(e)}")
+        log_event("critical", "webhook", "webhook.processing_error",
+                  f"A genuine webhook crashed while being processed: {type(e).__name__}: {e}",
+                  traceback=traceback.format_exc(),
+                  request_method=request.method, request_path=request.url.path, status_code=500)
         # Return 500 so Flutterwave knows to retry
         raise HTTPException(
             status_code=500,

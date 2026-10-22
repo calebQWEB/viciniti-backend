@@ -10,12 +10,17 @@ from uuid import UUID
 import httpx
 from datetime import datetime
 from app.models.transaction import Transaction, TransactionStatus
-from app.models.order import Order, OrderStatusS
+from app.models.order import Order, OrderStatus
 from app.models.notification import NotificationType
 from app.models.user import User
 from app.services.email_service import send_chargeback_alert_email
 from app.services.notification_service import create_notification
 from app.config import CHARGEBACK_FEE, get_settings
+from app.services.log_service import log_event
+import logging
+import traceback
+
+logger = logging.getLogger("junction")
 
 
 settings = get_settings()
@@ -47,7 +52,9 @@ async def handle_chargeback_filed(
     ).first()
     
     if not transaction:
-        print(f"❌ Chargeback for unknown transaction: {reference}")
+        log_event("error", "chargeback", "chargeback.unknown_reference",
+                  "Chargeback filed for a payment reference we don't recognise",
+                  details={"reference": reference, "dispute_id": dispute_id, "reason": reason})
         return False
     
     # Get the order
@@ -56,7 +63,9 @@ async def handle_chargeback_filed(
     ).first()
     
     if not order:
-        print(f"❌ Chargeback transaction has no associated order: {reference}")
+        log_event("error", "chargeback", "chargeback.unknown_reference",
+                  "Chargeback filed for a payment with no order",
+                  details={"reference": reference, "dispute_id": dispute_id, "reason": reason})
         return False
     
     # Update transaction status
@@ -103,13 +112,11 @@ async def handle_chargeback_filed(
     
     # Commit changes
     db.commit()
-    
-    # print(f"✅ Chargeback recorded for transaction {reference}")
-    # print(f"   Order: {order.id}")
-    # print(f"   Reason: {reason}")
-    # print(f"   Seller notified: {order.seller_id}")
-    # print(f"   Buyer notified: {order.buyer_id}")
-    
+    log_event("critical", "chargeback", "chargeback.filed", "A buyer's bank disputed a payment",
+              details={"order_id": order.id, "reference": reference, "amount": order.amount,
+                       "reason": reason, "dispute_id": dispute_id},
+              user_id=order.seller_id)
+
     return True
 
 
@@ -129,7 +136,9 @@ async def handle_chargeback_won(
     ).first()
     
     if not transaction:
-        print(f"❌ Chargeback win for unknown transaction: {reference}")
+        log_event("error", "chargeback", "chargeback.unknown_reference",
+                  "Chargeback 'won' event for a payment reference we don't recognise",
+                  details={"reference": reference})
         return False
     
     order = db.query(Order).filter(
@@ -156,8 +165,9 @@ async def handle_chargeback_won(
         )
     
     db.commit()
-    
-    print(f"✅ Chargeback won for transaction {reference}")
+    log_event("info", "chargeback", "chargeback.won", "Dispute resolved in the seller's favour",
+              details={"order_id": order.id if order else None, "reference": reference},
+              user_id=order.seller_id if order else None)
     
     return True
 
@@ -179,7 +189,9 @@ async def handle_chargeback_lost(
     ).first()
     
     if not transaction:
-        print(f"❌ Chargeback loss for unknown transaction: {reference}")
+        log_event("error", "chargeback", "chargeback.unknown_reference",
+                  "Chargeback 'lost' event for a payment reference we don't recognise",
+                  details={"reference": reference})
         return False
     
     order = db.query(Order).filter(
@@ -217,8 +229,11 @@ async def handle_chargeback_lost(
         )
     
     db.commit()
-    
-    print(f"❌ Chargeback lost for transaction {reference}")
+    log_event("error", "chargeback", "chargeback.lost",
+              "Dispute lost: the buyer was refunded and the seller charged the chargeback fee",
+              details={"order_id": order.id if order else None, "reference": reference,
+                       "amount": order.amount if order else None, "fee": CHARGEBACK_FEE},
+              user_id=order.seller_id if order else None)
     
     return True
 
@@ -236,11 +251,14 @@ async def submit_chargeback_evidence(
         ).first()
 
         if not transaction:
-            print(f"❌ No transaction found for order {order_id}")
+            log_event("error", "chargeback", "chargeback.evidence_failed",
+                      "Evidence submitted for an order with no payment", details={"order_id": order_id})
             return False
 
         if not transaction.chargeback_id:
-            print(f"❌ No chargeback ID found for transaction {transaction.id}")
+            log_event("error", "chargeback", "chargeback.evidence_failed",
+                      "Evidence submitted but the payment has no Flutterwave dispute ID",
+                      details={"order_id": order_id, "reference": transaction.reference})
             return False
 
         uploaded_proof_url = None
@@ -259,9 +277,11 @@ async def submit_chargeback_evidence(
             data = response.json()
             if data.get("status") == "success":
                 uploaded_proof_url = data.get("data")
-                print(f"✅ Proof uploaded: {uploaded_proof_url}")
             else:
-                print(f"⚠️ Proof upload failed: {data.get('message')}")
+                # Not fatal: the written response is still submitted below
+                log_event("error", "chargeback", "chargeback.evidence_failed",
+                          "Flutterwave rejected the proof photo upload",
+                          details={"order_id": order_id, "flutterwave_message": data.get("message")})
 
         # Step 2 — Decline the chargeback with evidence
         payload = {
@@ -283,12 +303,19 @@ async def submit_chargeback_evidence(
 
         data = response.json()
         if data.get("status") != "success":
-            print(f"❌ Chargeback decline failed: {data.get('message')}")
+            log_event("error", "chargeback", "chargeback.evidence_failed",
+                      "Flutterwave rejected the dispute evidence",
+                      details={"order_id": order_id, "dispute_id": transaction.chargeback_id,
+                               "flutterwave_message": data.get("message")})
             return False
 
-        print(f"✅ Chargeback evidence submitted for order {order_id}")
+        log_event("info", "chargeback", "chargeback.evidence_submitted", "Dispute evidence sent to Flutterwave",
+                  details={"order_id": order_id, "dispute_id": transaction.chargeback_id,
+                           "with_photo": bool(uploaded_proof_url)})
         return True
 
     except Exception as e:
-        print(f"❌ submit_chargeback_evidence error: {e}")
+        log_event("error", "chargeback", "chargeback.evidence_failed",
+                  f"Submitting dispute evidence crashed: {type(e).__name__}: {e}",
+                  details={"order_id": order_id}, traceback=traceback.format_exc())
         return False

@@ -36,6 +36,13 @@ def decode_access_token(token: str):
     
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
+# Same as oauth2_scheme, but anonymous requests get None instead of a 401
+optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
+
+def get_optional_user(token: Optional[str] = Depends(optional_oauth2_scheme)):
+    """The token payload for a logged-in request, or None (also for invalid tokens)."""
+    return decode_access_token(token) if token else None
+
 def get_current_user(token: str = Depends(oauth2_scheme)):
     payload = decode_access_token(token)
     if payload is None:

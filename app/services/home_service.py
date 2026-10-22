@@ -2,48 +2,48 @@
 from sqlalchemy.orm import Session, joinedload
 from app.models.listing import Listing, ListingStatus
 from app.models.service import Service, ServiceStatus
+from app.utils.geo import distance_km, within_radius, attach_distances
 
-def get_featured_items(db: Session, limit: int = 6):
-    """Most recent active listings, capped at one per seller."""
-    candidates = (
-        db.query(Listing)
-        .options(joinedload(Listing.owner))
-        .filter(Listing.status == ListingStatus.active)
-        .order_by(Listing.created_at.desc())
-        .limit(limit * 4)  # over-fetch to leave room for per-seller de-duplication
-        .all()
+def _get_featured(db: Session, model, active_status, limit: int,
+                  latitude: float = None, longitude: float = None, radius_km: float = 50):
+    """Active rows capped at one per seller: nearest first when a location is given, else most recent.
+    With a location, only rows inside the radius are returned (possibly none)."""
+    query = (
+        db.query(model)
+        .options(joinedload(model.owner))
+        .filter(model.status == active_status)
     )
+
+    if latitude is None or longitude is None:
+        query = query.order_by(model.created_at.desc())
+    else:
+        distance = distance_km(model.latitude, model.longitude, latitude, longitude)
+        query = (
+            query.filter(*within_radius(model.latitude, model.longitude, latitude, longitude, radius_km))
+            .add_columns(distance)
+            .order_by(distance, model.created_at.desc())
+        )
+
+    candidates = query.limit(limit * 4).all()  # over-fetch to leave room for per-seller de-duplication
+    if latitude is not None and longitude is not None:
+        candidates = attach_distances(candidates)
+
     seen_sellers = set()
     result = []
-    for listing in candidates:
-        if listing.user_id in seen_sellers:
+    for row in candidates:
+        if row.user_id in seen_sellers:
             continue
-        seen_sellers.add(listing.user_id)
-        result.append(listing)
+        seen_sellers.add(row.user_id)
+        result.append(row)
         if len(result) >= limit:
             break
     return result
 
-def get_featured_services(db: Session, limit: int = 6):
-    """Most recent active services, capped at one per seller."""
-    candidates = (
-        db.query(Service)
-        .options(joinedload(Service.owner))
-        .filter(Service.status == ServiceStatus.active)
-        .order_by(Service.created_at.desc())
-        .limit(limit * 4)
-        .all()
-    )
-    seen_sellers = set()
-    result = []
-    for service in candidates:
-        if service.user_id in seen_sellers:
-            continue
-        seen_sellers.add(service.user_id)
-        result.append(service)
-        if len(result) >= limit:
-            break
-    return result
+def get_featured_items(db: Session, limit: int = 6, **location):
+    return _get_featured(db, Listing, ListingStatus.active, limit, **location)
+
+def get_featured_services(db: Session, limit: int = 6, **location):
+    return _get_featured(db, Service, ServiceStatus.active, limit, **location)
 
 def get_platform_stats(db: Session):
     active_listings = db.query(Listing).filter(Listing.status == ListingStatus.active).count()

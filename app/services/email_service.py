@@ -1,12 +1,14 @@
+from html import escape
+
 import resend
-from app.config import get_settings
+from app.config import BRAND_NAME, get_settings
 
 settings = get_settings()
 resend.api_key = settings.RESEND_API_KEY
 
 
-def send_email(to: str, subject: str, html: str):
-    """Base function — all email sends go through here."""
+def send_email(to: str, subject: str, html: str) -> bool:
+    """Base function — all email sends go through here. Returns whether the send succeeded."""
     try:
         resend.Emails.send({
             "from": settings.RESEND_FROM_EMAIL,
@@ -14,10 +16,42 @@ def send_email(to: str, subject: str, html: str):
             "subject": subject,
             "html": html,
         })
+        return True
 
     except Exception as e:
-        # Never let email failure break the main flow
-        print(f"Email send failed: {e}")
+        # Never let email failure break the main flow. Imported here: log_service imports this module
+        from app.services.log_service import log_event, mask_email
+        log_event("error", "email", "email.failed", f"Email could not be sent: {e}",
+                  details={"to": mask_email(to), "subject": subject})
+        return False
+
+
+def send_admin_alert_email(to: str, event: str, message: str, details: dict, when: str, error_ref: str = None) -> bool:
+    """Critical-failure alert for admins. Content is escaped: it can contain user-supplied text."""
+    details_rows = "".join(
+        f'<tr><td style="padding: 4px 12px 4px 0; color: #777;">{escape(str(key))}</td>'
+        f'<td style="padding: 4px 0; font-family: monospace;">{escape(str(value))}</td></tr>'
+        for key, value in (details or {}).items()
+    )
+    ref_line = f'<p style="color: #555;">Reference: <strong>{escape(error_ref)}</strong></p>' if error_ref else ""
+    return send_email(
+        to=to,
+        subject=f"[{BRAND_NAME}] Critical: {event}",
+        html=f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 20px;">
+            <div style="background: #dc2626; border-radius: 12px; padding: 20px 24px; margin-bottom: 24px;">
+                <h1 style="color: white; font-size: 20px; margin: 0;">Critical: {escape(event)}</h1>
+                <p style="color: rgba(255,255,255,0.85); margin: 6px 0 0; font-size: 13px;">{escape(when)} UTC</p>
+            </div>
+            <p style="color: #333; line-height: 1.6;">{escape(message)}</p>
+            {ref_line}
+            <table style="font-size: 13px; margin: 16px 0; border-collapse: collapse;">{details_rows}</table>
+            <p style="color: #aaa; font-size: 12px; margin-top: 24px;">
+                You get at most one alert per event type per hour. Every occurrence is in the logs.
+            </p>
+        </div>
+        """,
+    )
 
 
 # ─── Email Templates ──────────────────────────────────────────
@@ -25,16 +59,16 @@ def send_email(to: str, subject: str, html: str):
 def send_welcome_email(to: str, name: str):
     send_email(
         to=to,
-        subject="Welcome to Viciniti 🎉",
+        subject=f"Welcome to {BRAND_NAME} 🎉",
         html=f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
             <div style="background: #2D6A4F; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
-                <h1 style="color: white; font-size: 28px; margin: 0; font-weight: 900;">Welcome to Viciniti</h1>
+                <h1 style="color: white; font-size: 28px; margin: 0; font-weight: 900;">Welcome to {BRAND_NAME}</h1>
                 <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0;">Your local community marketplace</p>
             </div>
             <h2 style="color: #111; font-size: 22px;">Hey {name}! 👋</h2>
             <p style="color: #555; line-height: 1.6;">
-                We're excited to have you on Viciniti. You can now buy and sell items,
+                We're excited to have you on {BRAND_NAME}. You can now buy and sell items,
                 offer and hire local services — all within your community.
             </p>
             <div style="background: #f9f9f9; border-radius: 12px; padding: 24px; margin: 24px 0;">
@@ -45,12 +79,12 @@ def send_welcome_email(to: str, name: str):
                     <li>Offer a service to your community</li>
                 </ul>
             </div>
-            <a href="https://viciniti-frontend.vercel.app" 
+            <a href="{settings.FRONTEND_URL}" 
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin-top: 8px;">
-                Explore Viciniti
+                Explore {BRAND_NAME}
             </a>
             <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
-                You're receiving this because you created a Viciniti account.
+                You're receiving this because you created a {BRAND_NAME} account.
             </p>
         </div>
         """
@@ -58,10 +92,10 @@ def send_welcome_email(to: str, name: str):
 
 
 def send_password_reset_email(to: str, name: str, reset_token: str):
-    reset_link = f"https://viciniti-frontend.vercel.app/reset-password?token={reset_token}"
+    reset_link = f"{settings.FRONTEND_URL}/reset-password?token={reset_token}"
     send_email(
         to=to,
-        subject="Reset your Viciniti password",
+        subject=f"Reset your {BRAND_NAME} password",
         html=f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
             <div style="background: #2D6A4F; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
@@ -90,7 +124,7 @@ def send_password_reset_email(to: str, name: str, reset_token: str):
 def send_new_message_email(to: str, name: str, sender_name: str):
     send_email(
         to=to,
-        subject=f"New message from {sender_name} on Viciniti",
+        subject=f"New message from {sender_name} on {BRAND_NAME}",
         html=f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
             <div style="background: #2D6A4F; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
@@ -98,14 +132,14 @@ def send_new_message_email(to: str, name: str, sender_name: str):
             </div>
             <h2 style="color: #111; font-size: 22px;">Hey {name},</h2>
             <p style="color: #555; line-height: 1.6;">
-                <strong>{sender_name}</strong> sent you a message on Viciniti.
+                <strong>{sender_name}</strong> sent you a message on {BRAND_NAME}.
             </p>
-            <a href="https://viciniti-frontend.vercel.app/dashboard/messages"
+            <a href="{settings.FRONTEND_URL}/dashboard/messages"
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 View Message
             </a>
             <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
-                You're receiving this because you have message notifications enabled on Viciniti.
+                You're receiving this because you have message notifications enabled on {BRAND_NAME}.
             </p>
         </div>
         """
@@ -115,7 +149,7 @@ def send_new_message_email(to: str, name: str, sender_name: str):
 def send_notification_email(to: str, name: str, notification_message: str):
     send_email(
         to=to,
-        subject="You have a new notification on Viciniti",
+        subject=f"You have a new notification on {BRAND_NAME}",
         html=f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
             <div style="background: #2D6A4F; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
@@ -125,12 +159,12 @@ def send_notification_email(to: str, name: str, notification_message: str):
             <div style="background: #f9f9f9; border-radius: 12px; padding: 20px; margin: 16px 0; border-left: 4px solid #2D6A4F;">
                 <p style="color: #333; margin: 0; line-height: 1.6;">{notification_message}</p>
             </div>
-            <a href="https://viciniti-frontend.vercel.app/dashboard/notifications"
+            <a href="{settings.FRONTEND_URL}/dashboard/notifications"
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 View Notifications
             </a>
             <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
-                You're receiving this because you have notifications enabled on Viciniti.
+                You're receiving this because you have notifications enabled on {BRAND_NAME}.
             </p>
         </div>
         """
@@ -154,7 +188,7 @@ def send_booking_confirmed_email(to: str, name: str, service_title: str, schedul
                 <p style="color: #333; font-weight: 700; margin: 0 0 8px;">Scheduled for:</p>
                 <p style="color: #2D6A4F; font-size: 18px; font-weight: 900; margin: 0;">{scheduled_at}</p>
             </div>
-            <a href="https://viciniti-frontend.vercel.app/dashboard/bookings"
+            <a href="{settings.FRONTEND_URL}/dashboard/bookings"
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 View My Bookings
             </a>
@@ -166,7 +200,7 @@ def send_booking_confirmed_email(to: str, name: str, service_title: str, schedul
 def send_order_completed_email(to: str, name: str, order_id: str):
     send_email(
         to=to,
-        subject="Your order has been completed — Viciniti",
+        subject=f"Your order has been completed — {BRAND_NAME}",
         html=f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
             <div style="background: #2D6A4F; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
@@ -176,7 +210,7 @@ def send_order_completed_email(to: str, name: str, order_id: str):
             <p style="color: #555; line-height: 1.6;">
                 Great news! Your order <strong>#{order_id[:8].upper()}</strong> has been marked as completed by the seller.
             </p>
-            <a href="https://viciniti-frontend.vercel.app/dashboard/purchases"
+            <a href="{settings.FRONTEND_URL}/dashboard/purchases"
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 View My Purchases
             </a>
@@ -187,7 +221,7 @@ def send_order_completed_email(to: str, name: str, order_id: str):
 def send_payout_initiated_email(to: str, name: str, amount: float, account_name: str, bank_name: str):
     send_email(
         to=to,
-        subject="Your payout has been initiated — Viciniti",
+        subject=f"Your payout has been initiated — {BRAND_NAME}",
         html=f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
             <div style="background: #2D6A4F; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
@@ -202,12 +236,12 @@ def send_payout_initiated_email(to: str, name: str, amount: float, account_name:
                 <p style="color: #2D6A4F; font-size: 24px; font-weight: 900; margin: 0 0 8px;">₦{amount:,.0f}</p>
                 <p style="color: #555; margin: 0;">To: {account_name} · {bank_name}</p>
             </div>
-            <a href="https://viciniti-frontend.vercel.app/dashboard/sales"
+            <a href="{settings.FRONTEND_URL}/dashboard/purchases?tab=sales"
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 View My Sales
             </a>
             <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
-                You're receiving this because a buyer confirmed completion of your order on Viciniti.
+                You're receiving this because a buyer confirmed completion of your order on {BRAND_NAME}.
             </p>
         </div>
         """
@@ -234,14 +268,14 @@ def send_chargeback_alert_email(to: str, name: str, amount: float, reason: str, 
                 <p style="color: #555; margin: 0;">Reason: <strong>{reason}</strong></p>
             </div>
             <p style="color: #555; line-height: 1.6;">
-                Log in to your Viciniti dashboard immediately to submit your evidence and defend this chargeback.
+                Log in to your {BRAND_NAME} dashboard immediately to submit your evidence and defend this chargeback.
             </p>
-            <a href="https://viciniti-frontend.vercel.app/dashboard/sales"
+            <a href="{settings.FRONTEND_URL}/dashboard/purchases?tab=sales"
                style="display: inline-block; background: #dc2626; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 View Dispute & Submit Evidence
             </a>
             <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
-                You're receiving this because a chargeback was filed against your Viciniti account.
+                You're receiving this because a chargeback was filed against your {BRAND_NAME} account.
             </p>
         </div>
         """
@@ -250,7 +284,7 @@ def send_chargeback_alert_email(to: str, name: str, amount: float, reason: str, 
 def send_order_completed_email(to: str, name: str, order_id: str):
     send_email(
         to=to,
-        subject="Action needed: Review your completed order — Viciniti",
+        subject=f"Action needed: Review your completed order — {BRAND_NAME}",
         html=f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
             <div style="background: #2D6A4F; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
@@ -264,12 +298,12 @@ def send_order_completed_email(to: str, name: str, order_id: str):
             <p style="color: #555; line-height: 1.6;">
                 If you don't confirm within 3 days, the order will be automatically confirmed.
             </p>
-            <a href="https://viciniti-frontend.vercel.app/dashboard/purchases"
+            <a href="{settings.FRONTEND_URL}/dashboard/purchases"
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 Review & Confirm Order
             </a>
             <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
-                You're receiving this because a seller marked your order as completed on Viciniti.
+                You're receiving this because a seller marked your order as completed on {BRAND_NAME}.
             </p>
         </div>
         """
@@ -278,7 +312,7 @@ def send_order_completed_email(to: str, name: str, order_id: str):
 def send_payout_scheduled_email(to: str, name: str, amount: float, order_id: str):
     send_email(
         to=to,
-        subject="Payout scheduled — Viciniti",
+        subject=f"Payout scheduled — {BRAND_NAME}",
         html=f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
             <div style="background: #2D6A4F; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
@@ -297,12 +331,12 @@ def send_payout_scheduled_email(to: str, name: str, amount: float, order_id: str
                 Your payout will be released within <strong>3 days</strong>, provided no dispute is filed.
                 We'll email you again once it's on its way.
             </p>
-            <a href="https://viciniti-frontend.vercel.app/dashboard/sales"
+            <a href="{settings.FRONTEND_URL}/dashboard/purchases?tab=sales"
                style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 View My Sales
             </a>
             <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
-                You're receiving this because a buyer confirmed completion of your order on Viciniti.
+                You're receiving this because a buyer confirmed completion of your order on {BRAND_NAME}.
             </p>
         </div>
         """
@@ -311,7 +345,7 @@ def send_payout_scheduled_email(to: str, name: str, amount: float, order_id: str
 def send_bank_account_needed_email(to: str, name: str, amount: float, order_id: str):
     send_email(
         to=to,
-        subject="Action needed: Add your bank account to get paid — Viciniti",
+        subject=f"Action needed: Add your bank account to get paid — {BRAND_NAME}",
         html=f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
             <div style="background: #dc2626; border-radius: 16px; padding: 32px; text-align: center; margin-bottom: 32px;">
@@ -329,12 +363,12 @@ def send_bank_account_needed_email(to: str, name: str, amount: float, order_id: 
             <p style="color: #555; line-height: 1.6;">
                 Please add your bank account details so we can process this payout.
             </p>
-            <a href="https://viciniti-frontend.vercel.app/dashboard/profile"
+            <a href="{settings.FRONTEND_URL}/dashboard/profile"
                style="display: inline-block; background: #dc2626; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
                 Add Bank Account
             </a>
             <p style="color: #aaa; font-size: 12px; margin-top: 32px;">
-                You're receiving this because a buyer confirmed completion of your order on Viciniti.
+                You're receiving this because a buyer confirmed completion of your order on {BRAND_NAME}.
             </p>
         </div>
         """

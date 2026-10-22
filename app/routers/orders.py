@@ -416,9 +416,7 @@ async def add_chargeback_response(
         response_notes=response_data.response_notes,
         evidence_photos=response_data.evidence_photos
     )
-    
-    print(f"✅ Chargeback response added for order {order_id}")
-    print(f"   Response: {response_data.response_notes[:100]}...")
+
     
     return {
         "status": "success",

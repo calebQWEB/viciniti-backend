@@ -6,9 +6,16 @@ from app.models.order import Order, OrderStatus
 from app.models.listing import Listing, ListingStatus
 from app.models.service import Service, ServiceStatus
 from app.models.transaction import Transaction, TransactionStatus
-from app.schemas.user import UserResponse, UserUpdate, PasswordChange
+from app.schemas.user import UserResponse, PublicUserResponse, UserUpdate, PasswordChange
+from app.schemas.listing import ListingResponse
+from app.schemas.service import ServiceResponse
+from app.schemas.review import PublicReviewResponse
+from pydantic import BaseModel
+from typing import List
 from app.utils.security import get_current_user, verify_password, hash_password
+from app.services.log_service import log_event
 from uuid import UUID
+from datetime import datetime
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -23,8 +30,8 @@ def get_me(current_user: dict = Depends(get_current_user), db: Session = Depends
         )
     return user
 
-# Get any user profile by ID
-@router.get("/{user_id}", response_model=UserResponse)
+# Get any user's public profile by ID (no email or coordinates)
+@router.get("/{user_id}", response_model=PublicUserResponse)
 def get_user(user_id: UUID, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -93,10 +100,38 @@ def change_password(
 
     user.password_hash = hash_password(password_data.new_password)
     db.commit()
+    log_event("info", "auth", "auth.password_changed", "Password changed", user_id=user.id)
 
     return {"message": "Password changed successfully"}
 
-@router.get("/{user_id}/stats")
+# Mark the welcome flow as finished (or skipped)
+@router.post("/me/complete-onboarding", response_model=UserResponse)
+def complete_onboarding(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == current_user["sub"]).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    if user.onboarded_at is None:
+        user.onboarded_at = datetime.utcnow()
+        db.commit()
+        db.refresh(user)
+        log_event("info", "auth", "user.onboarded", "Finished or skipped the welcome flow",
+                  details={"intent": user.intent}, user_id=user.id)
+    return user
+
+class UserStatsResponse(BaseModel):
+    # Public listing schemas, so coordinates are blurred like everywhere else
+    listings: List[ListingResponse]
+    services: List[ServiceResponse]
+    completed_orders_count: int
+
+@router.get("/{user_id}/stats", response_model=UserStatsResponse)
 def get_user_stats(user_id: UUID, db: Session = Depends(get_db)):
     # Get active listings
     listings = db.query(Listing).filter(
@@ -116,19 +151,17 @@ def get_user_stats(user_id: UUID, db: Session = Depends(get_db)):
         Order.status == OrderStatus.completed
     ).count()
 
-    print(f"User {user_id} has {len(listings)} listings, {len(services)} services, and {completed_orders_count} completed orders.")
-
     return {
         "listings": listings,
         "services": services,
         "completed_orders_count": completed_orders_count,
     }
 
-@router.get("/{user_id}/reviews")
+# Public reviews for a seller: reviewer's short name and what was bought or booked, no IDs
+@router.get("/{user_id}/reviews", response_model=List[PublicReviewResponse])
 def get_reviews(
     user_id: UUID,
     db: Session = Depends(get_db)
 ):
     from app.services.review_service import get_seller_reviews
-    reviews = get_seller_reviews(db, user_id)
-    return reviews
+    return get_seller_reviews(db, user_id)

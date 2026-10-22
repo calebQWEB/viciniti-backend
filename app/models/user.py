@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Float, DateTime
+from sqlalchemy import Column, String, Text, Float, DateTime, Boolean, text
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 from datetime import datetime
@@ -18,3 +18,10 @@ class User(Base):
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Onboarding: what the user came for ("buy", "sell" or "both"), and when they finished or skipped the welcome flow
+    intent = Column(String, nullable=True)
+    onboarded_at = Column(DateTime, nullable=True)
+
+    # Grants the admin dashboard and critical error alert emails
+    is_admin = Column(Boolean, nullable=False, default=False, server_default=text("false"))

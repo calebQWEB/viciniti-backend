@@ -1,9 +1,11 @@
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from sqlalchemy.orm import joinedload
 from app.models.service import Service, ServiceStatus
 from app.schemas.service import ServiceCreate, ServiceUpdate
+from app.utils.geo import distance_km, within_radius, attach_distances
+from app.services.log_service import log_event
 from uuid import UUID
 import math
 from typing import Optional
@@ -36,11 +38,14 @@ def create_service(db: Session, service_data: ServiceCreate, user_id: UUID):
     db.add(new_service)
     db.commit()
     db.refresh(new_service)
+    log_event("info", "listing", "service.created", "Service created",
+              details={"service_id": new_service.id, "price": new_service.price}, user_id=user_id)
     return new_service
 
 def get_services(db: Session, category: str = None, location: str = None,
                  latitude: float = None, longitude: float = None,
-                 radius_km: float = 50, skip: int = 0, limit: int = 20):
+                 radius_km: float = 50, sort: str = None, q: str = None,
+                 skip: int = 0, limit: int = 20):
     from app.models.category import Category
     from sqlalchemy.orm import joinedload
 
@@ -48,24 +53,34 @@ def get_services(db: Session, category: str = None, location: str = None,
         db.query(Service)
         .options(joinedload(Service.category_ref))
         .filter(Service.status == ServiceStatus.active)
-        .order_by(Service.created_at.desc())
     )
 
     if category:
         query = query.join(Category, Service.category_id == Category.id).filter(Category.slug == category)
     if location:
         query = query.filter(Service.location.ilike(f"%{location}%"))
+    if q and q.strip():
+        term = q.strip()
+        query = query.filter(or_(
+            Service.title.icontains(term, autoescape=True),
+            Service.description.icontains(term, autoescape=True),
+        ))
 
-    services = query.offset(skip).limit(limit).all()
+    if latitude is None or longitude is None:
+        return query.order_by(Service.created_at.desc()).offset(skip).limit(limit).all()
 
-    if latitude and longitude:
-        services = [
-            service for service in services
-            if service.latitude and service.longitude and
-               _calculate_distance(latitude, longitude, service.latitude, service.longitude) <= radius_km
-        ]
+    # Radius filter runs in SQL before paging, so every page is full
+    distance = distance_km(Service.latitude, Service.longitude, latitude, longitude)
+    query = (
+        query.filter(*within_radius(Service.latitude, Service.longitude, latitude, longitude, radius_km))
+        .add_columns(distance)
+    )
+    if sort == "newest":
+        query = query.order_by(Service.created_at.desc())
+    else:
+        query = query.order_by(distance, Service.created_at.desc())
 
-    return services
+    return attach_distances(query.offset(skip).limit(limit).all())
 
 def get_user_services(
     db: Session,
@@ -173,12 +188,6 @@ def delete_service(db: Session, service_id: UUID, user_id: UUID):
 
     db.delete(service)
     db.commit()
+    log_event("info", "listing", "service.deleted", "Service deleted",
+              details={"service_id": service_id}, user_id=user_id)
     return {"message": "Service deleted successfully"}
-
-def _calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    R = 6371
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    return R * c

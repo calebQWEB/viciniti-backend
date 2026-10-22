@@ -9,7 +9,8 @@ from app.models.user import User
 from app.models.service import Service
 from app.models.order import Order, OrderStatus
 from app.services.notification_service import create_notification
-from app.config import PLATFORM_FEE_PERCENTAGE
+from app.config import calculate_platform_fee
+from app.services.log_service import log_event
 from uuid import UUID
 
 def create_booking(db: Session, booking_data: BookingCreate, client_id: UUID):
@@ -30,7 +31,7 @@ def create_booking(db: Session, booking_data: BookingCreate, client_id: UUID):
 
     # Calculate amount and fee
     amount = service.price
-    fee = round(amount * PLATFORM_FEE_PERCENTAGE, 2)
+    fee = calculate_platform_fee(amount)
 
     new_booking = Booking(
         service_id=booking_data.service_id,
@@ -44,6 +45,10 @@ def create_booking(db: Session, booking_data: BookingCreate, client_id: UUID):
     db.add(new_booking)
     db.commit()
     db.refresh(new_booking)
+    log_event("info", "booking", "booking.requested", "Booking requested",
+              details={"booking_id": new_booking.id, "service_id": new_booking.service_id,
+                       "amount": new_booking.amount},
+              user_id=client_id)
 
     # Notify provider of the new request
     create_notification(
@@ -51,7 +56,7 @@ def create_booking(db: Session, booking_data: BookingCreate, client_id: UUID):
         new_booking.provider_id,
         f"You have a new booking request for {service.title}. Please accept or decline.",
         type=NotificationType.booking,
-        link="/dashboard/bookings",
+        link=f"/dashboard/bookings?tab=requests&highlight={new_booking.id}",
     )
 
     return new_booking
@@ -138,6 +143,19 @@ def update_booking(db: Session, booking_id: UUID, booking_data: BookingUpdate, u
     db.commit()
     db.refresh(booking)
 
+    if booking.status != previous_status:
+        if booking.status == BookingStatus.confirmed:
+            event, message = "booking.accepted", "Provider accepted a booking request"
+        elif booking.status == BookingStatus.cancelled and previous_status == BookingStatus.pending and is_provider:
+            event, message = "booking.declined", "Provider declined a booking request"
+        elif booking.status == BookingStatus.cancelled:
+            event, message = "booking.cancelled", f"Booking cancelled by the {'client' if is_client else 'provider'}"
+        else:
+            event, message = f"booking.{booking.status.value}", f"Booking marked {booking.status.value}"
+        log_event("info", "booking", event, message,
+                  details={"booking_id": booking.id, "from": previous_status.value, "to": booking.status.value},
+                  user_id=user_id)
+
     service = db.query(Service).filter(Service.id == booking.service_id).first()
     client = db.query(User).filter(User.id == booking.client_id).first()
 
@@ -201,7 +219,7 @@ def update_booking(db: Session, booking_id: UUID, booking_data: BookingUpdate, u
                     booking.provider_id,
                     f"A booking request for {service.title} was withdrawn by the client.",
                     type=NotificationType.booking,
-                    link="/dashboard/bookings",
+                    link=f"/dashboard/bookings?tab=requests&highlight={booking.id}",
                 )
         elif previous_status == BookingStatus.confirmed:
             # Either side cancelled after acceptance, before payment
@@ -212,7 +230,12 @@ def update_booking(db: Session, booking_id: UUID, booking_data: BookingUpdate, u
                     other_party_id,
                     f"The booking for {service.title} was cancelled before payment.",
                     type=NotificationType.booking,
-                    link="/dashboard/bookings",
+                    # Provider sees it under Requests, client under My Bookings
+                    link=(
+                        f"/dashboard/bookings?tab=requests&highlight={booking.id}"
+                        if is_client
+                        else f"/dashboard/bookings?highlight={booking.id}"
+                    ),
                 )
 
     return booking

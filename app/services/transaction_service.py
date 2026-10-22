@@ -7,9 +7,11 @@ from fastapi import HTTPException, status
 from app.models.transaction import Transaction, TransactionStatus, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionUpdate
 from app.models.order import Order
-from app.config import get_settings
+from app.config import BRAND_NAME, get_settings
 from uuid import UUID
+from app.services.log_service import log_event
 import httpx
+import traceback
 import uuid
 
 settings = get_settings()
@@ -120,7 +122,7 @@ async def initiate_payment(amount: float, email: str, order_id: str):
             "email": email,
         },
         "customizations": {
-            "title": "Viciniti Payment",
+            "title": f"{BRAND_NAME} Payment",
             "description": f"Payment for order {order_id}",
         }
     }
@@ -136,9 +138,11 @@ async def initiate_payment(amount: float, email: str, order_id: str):
         )
 
     data = response.json()
-    print("Flutterwave Response", data)
 
     if data.get("status") != "success":
+        log_event("error", "payment", "payment.start_failed", "Flutterwave refused to create a payment link",
+                  details={"order_id": order_id, "amount": amount, "reference": reference,
+                           "flutterwave_message": data.get("message")})
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Payment initiation failed"
@@ -161,33 +165,37 @@ async def verify_payment(reference: str, order_id: UUID, db: Session):
 
         data = response.json()
 
-        if data.get("status") != "success":
+        def unconfirmed(reason: str, **extra) -> bool:
+            log_event("warning", "payment", "payment.unconfirmed", f"Flutterwave did not confirm a payment: {reason}",
+                      details={"reference": reference, "order_id": order_id, **extra})
             return False
 
+        if data.get("status") != "success":
+            return unconfirmed("verification request failed", flutterwave_message=data.get("message"))
+
         if data["data"]["status"] != "successful":
-            return False
+            return unconfirmed("payment not successful", flutterwave_status=data["data"]["status"])
 
         # Fetch the order from the database
         order = db.query(Order).filter(Order.id == order_id).first()
         if not order:
-            return False
+            return unconfirmed("no matching order")
 
         # Verify the amount Flutterwave charged matches the order amount
         flw_amount = data["data"]["amount"]
         flw_currency = data["data"]["currency"]
 
         if flw_currency != "NGN":
-            print(f"❌ Currency mismatch: expected NGN, got {flw_currency}")
-            return False
+            return unconfirmed("wrong currency", expected_currency="NGN", paid_currency=flw_currency)
 
         if flw_amount < order.amount:
-            print(f"❌ Amount mismatch: expected {order.amount}, got {flw_amount}")
-            return False
+            return unconfirmed("underpaid", expected_amount=order.amount, paid_amount=flw_amount)
 
         return True
 
     except Exception as e:
-        print(f"❌ verify_payment error: {e}")
+        log_event("error", "payment", "payment.verify_error", f"Payment verification crashed: {type(e).__name__}: {e}",
+                  details={"reference": reference, "order_id": order_id}, traceback=traceback.format_exc())
         return False
 
 def get_transaction_stats(db: Session, user_id: UUID):

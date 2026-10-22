@@ -1,4 +1,4 @@
-# Viciniti Payment Flow Documentation
+# Junction Payment Flow Documentation
 
 ## Table of Contents
 
@@ -13,7 +13,7 @@
 
 ## Overview
 
-Viciniti uses **Flutterwave** as the payment processor. The system handles payments through a three-part flow:
+Junction uses **Flutterwave** as the payment processor. The system handles payments through a three-part flow:
 
 1. **Initiation** — User clicks "Buy Now" → Order created → Payment session initiated with Flutterwave
 2. **Execution** — User enters payment details on Flutterwave → Payment processed
@@ -145,7 +145,7 @@ def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
     if listing.status != ListingStatus.active:
         raise HTTPException(status_code=400, detail="This listing is no longer available")
 
-    # Calculate amount and Viciniti fee (5%)
+    # Calculate amount and Junction fee (5%)
     amount = listing.price
     fee = round(amount * FEE_PERCENTAGE, 2)
 
@@ -232,7 +232,7 @@ async def initiate_payment(amount: float, email: str, order_id: str):
             "email": email,
         },
         "customizations": {
-            "title": "Viciniti Payment",
+            "title": "Junction Payment",
             "description": f"Payment for order {order_id}",
         }
     }
@@ -569,7 +569,7 @@ class Order(Base):
     buyer_id = Column(UUID, ForeignKey("users.id"))
     seller_id = Column(UUID, ForeignKey("users.id"))
     amount = Column(Float)              # Listing price
-    fee = Column(Float)                 # 5% Viciniti fee
+    fee = Column(Float)                 # 5% Junction fee
     status = Column(Enum(OrderStatus), default=OrderStatus.pending)
     # Status values: pending → completed or cancelled
     created_at = Column(DateTime)
@@ -586,7 +586,7 @@ class Transaction(Base):
     order_id = Column(UUID)             # Links to Order
     reference = Column(String, unique=True)  # e.g., "VIC-ABC123XY"
     amount = Column(Float)              # Amount paid
-    fee = Column(Float)                 # Viciniti's portion
+    fee = Column(Float)                 # Junction's portion
     type = Column(Enum(TransactionType))  # payment or payout
     status = Column(Enum(TransactionStatus), default=TransactionStatus.pending)
     # Status values: pending → success or failed

@@ -4,6 +4,7 @@ from uuid import UUID
 from app.models.bank_account import BankAccount
 from app.schemas.bank_account import BankAccountCreate
 from app.services.payment_service import reschedule_stuck_payouts
+from app.services.log_service import log_event
 
 def create_bank_account(db: Session, user_id: UUID, data: BankAccountCreate) -> BankAccount:
     existing_count = db.query(BankAccount).filter(
@@ -31,6 +32,10 @@ def create_bank_account(db: Session, user_id: UUID, data: BankAccountCreate) -> 
     db.add(bank_account)
     db.commit()
     db.refresh(bank_account)
+    log_event("info", "payout", "bank_account.added", "Payout bank account added",
+              details={"bank_name": bank_account.bank_name, "account_number": bank_account.account_number,
+                       "is_default": bank_account.is_default},
+              user_id=user_id)
 
     if will_be_default:
         reschedule_stuck_payouts(db, user_id)
@@ -63,6 +68,9 @@ def delete_bank_account(db: Session, user_id: UUID, account_id: UUID):
 
     db.delete(account)
     db.commit()
+    log_event("info", "payout", "bank_account.removed", "Payout bank account removed",
+              details={"bank_name": account.bank_name, "account_number": account.account_number},
+              user_id=user_id)
 
 def set_default_bank_account(db: Session, user_id: UUID, account_id: UUID):
     db.query(BankAccount).filter(

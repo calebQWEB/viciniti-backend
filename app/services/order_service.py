@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import cast, String
-from sqlalchemy import func
+from sqlalchemy import func, or_, and_
+from datetime import datetime, timedelta
 from fastapi import HTTPException, status
 from math import ceil
 from app.models.order import Order, OrderStatus
@@ -9,9 +10,13 @@ from app.schemas.order import OrderCreate, OrderUpdate
 from app.services.notification_service import create_notification
 from app.services.email_service import send_order_completed_email
 from app.models.user import User
-from app.config import PLATFORM_FEE_PERCENTAGE
+from app.config import calculate_platform_fee, UNPAID_ORDER_MINUTES
+from app.services.log_service import log_event
 from uuid import UUID
 from typing import Optional
+
+# Orders past payment that still claim the item
+OPEN_PAID_STATUSES = (OrderStatus.paid, OrderStatus.fulfilled, OrderStatus.completed, OrderStatus.disputed)
 
 def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
     # Get the listing
@@ -36,9 +41,33 @@ def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
             detail="This listing is no longer available"
         )
 
+    # A listing stays "active" until payment completes, so open orders act as a hold:
+    # paid ones always, unpaid ones until the scheduler would cancel them
+    hold_cutoff = datetime.utcnow() - timedelta(minutes=UNPAID_ORDER_MINUTES)
+    open_orders = db.query(Order).filter(
+        Order.listing_id == listing.id,
+        or_(
+            Order.status.in_(OPEN_PAID_STATUSES),
+            and_(Order.status == OrderStatus.pending, Order.created_at >= hold_cutoff),
+        ),
+    ).all()
+
+    # Clicking Buy again shouldn't create a duplicate order
+    own_pending = next(
+        (o for o in open_orders if o.buyer_id == UUID(str(buyer_id)) and o.status == OrderStatus.pending),
+        None,
+    )
+    if own_pending:
+        return own_pending
+    if open_orders:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Someone is already buying this item. Check back in a few minutes."
+        )
+
     # Calculate amount and fee
     amount = listing.price
-    fee = round(amount * PLATFORM_FEE_PERCENTAGE, 2)
+    fee = calculate_platform_fee(amount)
 
     new_order = Order(
         listing_id=order_data.listing_id,
@@ -51,6 +80,9 @@ def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
     db.add(new_order)
     db.commit()
     db.refresh(new_order)
+    log_event("info", "order", "order.created", "Order placed",
+              details={"order_id": new_order.id, "listing_id": listing.id, "amount": amount, "fee": fee},
+              user_id=buyer_id)
 
     return new_order
 
@@ -207,6 +239,8 @@ def cancel_order(db: Session, order_id: UUID, user_id: UUID):
 
     order.status = OrderStatus.cancelled
     db.commit()
+    log_event("info", "order", "order.cancelled", "Order cancelled by the buyer",
+              details={"order_id": order.id}, user_id=user_id)
     db.refresh(order)
 
     return order

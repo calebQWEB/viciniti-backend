@@ -5,6 +5,8 @@ Handles completion photos, seller notes, and buyer confirmation.
 Tracks evidence for chargeback defense.
 """
 
+import logging
+
 from sqlalchemy.orm import Session
 from uuid import UUID
 from datetime import datetime, timedelta
@@ -17,6 +19,9 @@ from app.services.payment_service import initiate_seller_payout, check_seller_pa
 from app.services.review_service import create_review
 from app.services.email_service import send_payout_scheduled_email, send_bank_account_needed_email
 from app.schemas.review import ReviewCreate
+from app.services.log_service import log_event
+
+logger = logging.getLogger("junction")
 
 
 async def mark_order_completion(
@@ -27,19 +32,21 @@ async def mark_order_completion(
     notes: str = None
 ) -> bool:
     order = db.query(Order).filter(Order.id == order_id).first()
-    
+
     if not order:
-        print(f"❌ Order not found: {order_id}")
+        logger.debug("Completion for unknown order %s", order_id)
         return False
-    
+
     # Verify seller ownership
     if order.seller_id != seller_id:
-        print(f"❌ Unauthorized: User {seller_id} is not seller of order {order_id}")
+        log_event("warning", "order", "order.unauthorized_action",
+                  "Someone tried to mark another seller's order complete",
+                  details={"order_id": order_id, "action": "mark_complete"}, user_id=seller_id)
         return False
-    
+
     # Verify order is paid (payment confirmed, awaiting fulfillment)
     if order.status != OrderStatus.paid:
-        print(f"❌ Order {order_id} is not in paid status (current: {order.status})")
+        logger.debug("Order %s not in paid status (current: %s)", order_id, order.status)
         return False
     
     # Store completion proof
@@ -60,83 +67,12 @@ async def mark_order_completion(
     )
     
     db.commit()
-    
-    print(f"✅ Order {order_id} marked as completed by seller {seller_id}")
-    print(f"   Photos: {len(order.completion_photos or [])}")
-    print(f"   Notes: {notes[:50] if notes else 'None'}...")
-    
+    log_event("info", "order", "order.fulfilled", "Seller marked the order complete",
+              details={"order_id": order_id, "photos": len(order.completion_photos or [])},
+              user_id=seller_id)
+
     return True
 
-
-# async def buyer_confirm_completion(
-#     db: Session,
-#     order_id: UUID,
-#     buyer_id: UUID,
-#     rating: int = None,
-#     review_text: str = None
-# ) -> bool:
-#     order = db.query(Order).filter(Order.id == order_id).first()
-    
-#     if not order:
-#         print(f"❌ Order not found: {order_id}")
-#         return False
-    
-#     # Verify buyer ownership
-#     if order.buyer_id != buyer_id:
-#         print(f"❌ Unauthorized: User {buyer_id} is not buyer of order {order_id}")
-#         return False
-    
-#     # Verify order has completion proof from seller
-#     if not order.completed_at:
-#         print(f"❌ Order {order_id} is not marked as completed by seller yet")
-#         return False
-
-#     # Verify order is in the right status
-#     if order.status != OrderStatus.fulfilled:
-#         print(f"❌ Order {order_id} is not in fulfilled status (current: {order.status})")
-#         return False
-    
-#     # Mark as confirmed and move to final completed state
-#     order.buyer_accepted_at = datetime.utcnow()
-#     order.status = OrderStatus.completed
-
-#     # Save the buyer's rating and review
-#     if rating:
-#         create_review(
-#             db,
-#             order_id=order_id,
-#             buyer_id=buyer_id,
-#             seller_id=order.seller_id,
-#             data=ReviewCreate(
-#                 rating=rating,
-#                 review_text=review_text
-#             )
-#         )
-
-#     await initiate_seller_payout(db, order_id)
-
-#     # Notify seller
-#     create_notification(
-#         db,
-#         order.seller_id,
-#         f"✅ Buyer confirmed completion of order {order_id}. "
-#         f"Payment of ₦{order.amount:,.0f} is now being released to your account."
-#     )
-    
-#     # Notify buyer
-#     create_notification(
-#         db,
-#         order.buyer_id,
-#         f"✅ Thank you for confirming completion! Your order is now complete."
-#     )
-    
-#     db.commit()
-    
-#     print(f"✅ Order {order_id} confirmed by buyer {buyer_id}")
-#     print(f"   Rating: {rating}/5" if rating else "   Rating: Not provided")
-#     print(f"   Review: {review_text[:50] if review_text else 'No review'}...")
-    
-#     return True
 
 async def buyer_confirm_completion(
     db: Session,
@@ -148,22 +84,24 @@ async def buyer_confirm_completion(
     order = db.query(Order).filter(Order.id == order_id).first()
     
     if not order:
-        print(f"❌ Order not found: {order_id}")
+        logger.debug("Confirmation for unknown order %s", order_id)
         return False
-    
+
     # Verify buyer ownership
     if order.buyer_id != buyer_id:
-        print(f"❌ Unauthorized: User {buyer_id} is not buyer of order {order_id}")
+        log_event("warning", "order", "order.unauthorized_action",
+                  "Someone tried to confirm another buyer's order",
+                  details={"order_id": order_id, "action": "confirm"}, user_id=buyer_id)
         return False
-    
+
     # Verify order has completion proof from seller
     if not order.completed_at:
-        print(f"❌ Order {order_id} is not marked as completed by seller yet")
+        logger.debug("Order %s not marked complete by seller yet", order_id)
         return False
 
     # Verify order is in the right status
     if order.status != OrderStatus.fulfilled:
-        print(f"❌ Order {order_id} is not in fulfilled status (current: {order.status})")
+        logger.debug("Order %s not in fulfilled status (current: %s)", order_id, order.status)
         return False
     
     # Mark as confirmed and move to final completed state
@@ -232,11 +170,21 @@ async def buyer_confirm_completion(
     )
     
     db.commit()
-    
-    print(f"✅ Order {order_id} confirmed by buyer {buyer_id}")
-    print(f"   Rating: {rating}/5" if rating else "   Rating: Not provided")
-    print(f"   Review: {review_text[:50] if review_text else 'No review'}...")
-    
+
+    log_event("info", "order", "order.confirmed", "Buyer confirmed the order",
+              details={"order_id": order_id, "amount": order.amount}, user_id=buyer_id)
+    if rating:
+        log_event("info", "order", "review.posted", "Buyer left a review",
+                  details={"order_id": order_id, "rating": rating}, user_id=buyer_id)
+    if is_eligible:
+        log_event("info", "payout", "payout.scheduled", "Seller payout scheduled",
+                  details={"order_id": order_id, "amount": order.amount, "due_at": order.payout_due_at},
+                  user_id=order.seller_id)
+    else:
+        log_event("warning", "payout", "payout.blocked_no_bank",
+                  "Payout due but the seller has no bank account",
+                  details={"order_id": order_id, "amount": order.amount}, user_id=order.seller_id)
+
     return True
 
 
