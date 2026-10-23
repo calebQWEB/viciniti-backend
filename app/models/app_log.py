@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, Text, Integer, Boolean, DateTime, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 from app.database import Base
 from datetime import datetime
 import uuid
@@ -8,7 +9,7 @@ import uuid
 LOG_LEVELS = ("info", "warning", "error", "critical")
 LOG_CATEGORIES = (
     "auth", "listing", "order", "payment", "payout", "webhook",
-    "chargeback", "booking", "email", "scheduler", "request",
+    "chargeback", "booking", "email", "scheduler", "request", "admin",
 )
 
 
@@ -44,3 +45,6 @@ class AppLog(Base):
     resolved_at = Column(DateTime, nullable=True)
     resolved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     resolution_note = Column(Text, nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    resolver = relationship("User", foreign_keys=[resolved_by])

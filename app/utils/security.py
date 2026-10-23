@@ -1,10 +1,13 @@
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from datetime import datetime, timedelta
 from typing import Optional
+from uuid import UUID
+from sqlalchemy.orm import Session
 from app.config import get_settings
+from app.database import get_db
 
 settings = get_settings()
 
@@ -52,3 +55,24 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
             headers={"WWW-Authenticate": "Bearer"},
         )
     return payload
+
+def require_admin(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """The admin's User row. Checked against the database on every request, so revoking admin takes effect at once.
+    Non-admins get a 404, so the admin area doesn't reveal that it exists."""
+    from app.models.user import User
+    from app.services.log_service import log_event
+
+    try:
+        user = db.query(User).filter(User.id == UUID(str(current_user.get("sub")))).first()
+    except ValueError:
+        user = None
+    if not user or not user.is_admin:
+        log_event("warning", "admin", "admin.access_denied", "A non-admin tried to open the admin area",
+                  user_id=user.id if user else None,
+                  request_method=request.method, request_path=request.url.path, status_code=404)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    return user

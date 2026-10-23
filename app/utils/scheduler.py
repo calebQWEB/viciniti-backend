@@ -8,7 +8,7 @@ from app.models.booking import Booking, BookingStatus
 from app.models.service import Service
 from app.models.notification import NotificationType
 from datetime import datetime, timedelta
-from app.services.payment_service import initiate_seller_payout, check_seller_payout_eligibility
+from app.services.payment_service import send_payout, check_seller_payout_eligibility
 from app.services.notification_service import create_notification
 from app.services.email_service import send_payout_scheduled_email, send_bank_account_needed_email
 from app.services.log_service import log_event
@@ -135,16 +135,12 @@ async def process_due_payouts():
             Order.status == OrderStatus.completed
         ).all()
 
-        for order in due_orders:
-            success = await initiate_seller_payout(db, order.id)
-            if success:
-                order.payout_due_at = None  # Prevent reprocessing
-                order.payout_completed_at = datetime.utcnow()
-            else:
-                # initiate_seller_payout has logged why; the order stays due and is retried next run
-                logger.info("Payout for order %s not sent, will retry next run", order.id)
-
-        db.commit()
+        for order_id in [order.id for order in due_orders]:
+            # send_payout locks the order, marks it paid on success and records failures itself
+            result = await send_payout(db, order_id)
+            if not result.ok:
+                # Logged by send_payout; the order stays due and is retried next run
+                logger.info("Payout for order %s not sent (%s), will retry next run", order_id, result.outcome)
 
     except Exception as e:
         log_event("critical", "scheduler", "scheduler.payouts_failed", f"Scheduled job 'process_due_payouts' crashed: {type(e).__name__}: {e}",
