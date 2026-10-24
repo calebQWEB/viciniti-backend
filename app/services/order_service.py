@@ -12,6 +12,7 @@ from app.services.email_service import send_order_completed_email
 from app.models.user import User
 from app.config import calculate_platform_fee, UNPAID_ORDER_MINUTES
 from app.services.log_service import log_event
+from app.services.suspension import is_unavailable
 from uuid import UUID
 from typing import Optional
 
@@ -34,8 +35,8 @@ def create_order(db: Session, order_data: OrderCreate, buyer_id: UUID):
             detail="You cannot buy your own listing"
         )
 
-    # Check listing is still active
-    if listing.status != ListingStatus.active:
+    # Check listing is still active (removed listings and suspended sellers' listings count as unavailable)
+    if listing.status != ListingStatus.active or is_unavailable(db, listing):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This listing is no longer available"

@@ -35,7 +35,7 @@ PAYOUT_CRASH_PREFIX = "Crashed: "
 @dataclass
 class PayoutResult:
     ok: bool
-    # sent | busy | not_found | not_payable | already_paid | no_bank | rejected | crashed
+    # sent | busy | not_found | not_payable | already_paid | seller_suspended | no_bank | rejected | crashed
     outcome: str
     message: str = ""
 
@@ -81,6 +81,9 @@ async def send_payout(db: Session, order_id: UUID) -> PayoutResult:
             status = order.status.value
             db.rollback()
             return PayoutResult(False, "not_payable", f"Order is {status}, not completed")
+        if db.query(User.is_suspended).filter(User.id == order.seller_id).scalar():
+            db.rollback()
+            return PayoutResult(False, "seller_suspended", "Payout held: the seller is suspended")
 
         bank_account = db.query(BankAccount).filter(
             BankAccount.user_id == order.seller_id,

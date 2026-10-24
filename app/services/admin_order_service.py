@@ -19,6 +19,7 @@ from app.models.user import User
 from app.services.log_service import log_event
 from app.services.notification_service import create_notification
 from app.services.payment_service import PAYOUT_CRASH_PREFIX, send_payout
+from app.services.suspension import owner_not_suspended
 
 QUEUE_LIMIT = 100
 RETRY_ALL_LIMIT = 50
@@ -50,6 +51,7 @@ def _failing_payouts_filter(now: datetime):
         Order.payout_completed_at.is_(None),
         Order.payout_due_at.isnot(None),
         Order.payout_due_at <= now,
+        owner_not_suspended(Order.seller_id),
     )
 
 
@@ -58,6 +60,16 @@ def _blocked_payouts_filter():
         Order.status == OrderStatus.completed,
         Order.payout_completed_at.is_(None),
         Order.payout_due_at.is_(None),
+        owner_not_suspended(Order.seller_id),
+    )
+
+
+def _held_payouts_filter():
+    # Seller suspended: nothing is paid out until an admin unsuspends them
+    return and_(
+        Order.status == OrderStatus.completed,
+        Order.payout_completed_at.is_(None),
+        ~owner_not_suspended(Order.seller_id),
     )
 
 
@@ -78,6 +90,7 @@ def _queue_filters(now: datetime) -> dict:
     return {
         "failing_payouts": _failing_payouts_filter(now),
         "blocked_payouts": _blocked_payouts_filter(),
+        "held_payouts": _held_payouts_filter(),
         "refunds": _refunds_filter(),
         "disputes": _disputes_filter(),
     }
@@ -262,6 +275,7 @@ def get_queues(db: Session) -> dict:
     order_by = {
         "failing_payouts": Order.payout_due_at,
         "blocked_payouts": Order.buyer_accepted_at,
+        "held_payouts": Order.buyer_accepted_at,
         "refunds": Order.created_at,
         "disputes": Order.created_at,
     }
@@ -291,6 +305,7 @@ def _get_order(db: Session, order_id: UUID) -> Order:
 def _can_retry_payout(order: Order, now: datetime) -> bool:
     return (
         order.status == OrderStatus.completed
+        and not (order.seller and order.seller.is_suspended)
         and order.payout_completed_at is None
         and order.payout_due_at is not None
         and order.payout_due_at <= now
@@ -345,6 +360,8 @@ def _timeline(order: Order, transactions: List[Transaction], logs: List[AppLog])
                           "tone": "upcoming" if order.payout_due_at > datetime.utcnow() else "problem"})
         else:
             steps.append({"label": "Payout blocked: seller has no bank account", "tone": "problem"})
+        if order.seller and order.seller.is_suspended:
+            steps.append({"label": "Payout held: seller is suspended", "tone": "problem"})
 
     if order.refunded_at:
         steps.append({"label": "Refunded by admin", "at": order.refunded_at, "detail": order.refund_reference})
@@ -412,7 +429,8 @@ async def retry_payout(db: Session, order_id: UUID, admin_id: UUID) -> dict:
     order = _get_order(db, order_id)
     if not _can_retry_payout(order, datetime.utcnow()):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="This order has no payout due: it's not completed, not due yet, or already paid")
+                            detail="This order has no payout due: it's not completed, not due yet, already paid, "
+                                   "or the seller is suspended")
     db.rollback()  # start send_payout's locking transaction clean
 
     result = await send_payout(db, order_id)

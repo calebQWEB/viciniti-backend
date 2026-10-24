@@ -11,15 +11,22 @@ from app.schemas.app_log import (
     BulkResolveRequest, BulkResolveResponse, LogDetail, LogStatus, LogSummary, PaginatedLogs, ResolveRequest,
 )
 from app.schemas.admin import (
-    AdminOrderDetail, AdminOverview, MarkRefundedRequest, OrderQueues, PaginatedAdminOrders, PayoutAttemptResult,
-    RetryAllResult,
+    AdminCategory, AdminListingDetail, AdminOrderDetail, AdminOverview, AdminUserDetail, CategoryCreate,
+    CategoryReorder, CategoryUpdate, ListingKind, MarkRefundedRequest, OrderQueues, PaginatedAdminListings,
+    PaginatedAdminOrders, PaginatedAdminUsers, PayoutAttemptResult, RemoveListingRequest, RestoreListingRequest,
+    RetryAllResult, SuspendRequest, UnsuspendRequest, UserFilter,
 )
+from app.services.admin_category_service import (
+    create_category, delete_category, list_categories, reorder_categories, update_category,
+)
+from app.services.admin_listing_service import get_listing_detail, list_listings, remove_listing, restore_listing
 from app.services.admin_log_service import (
     bulk_resolve, get_log, get_summary, list_logs, reopen_log, resolve_log,
 )
 from app.services.admin_order_service import (
     get_order_detail, get_overview, get_queues, list_orders, mark_refunded, retry_failing_payouts, retry_payout,
 )
+from app.services.admin_user_service import get_user_detail, list_users, suspend_user, unsuspend_user
 from app.utils.security import require_admin
 
 # Every route here is admin-only; non-admins get a 404
@@ -140,3 +147,121 @@ def refund(
     db: Session = Depends(get_db),
 ):
     return mark_refunded(db, order_id, admin.id, data.reference, data.note)
+
+
+# ---------- Users ----------
+
+@router.get("/users", response_model=PaginatedAdminUsers)
+def users(
+    page: int = Query(1, ge=1),
+    limit: int = Query(25, ge=1, le=100),
+    search: Optional[str] = None,
+    filter: UserFilter = "all",
+    db: Session = Depends(get_db),
+):
+    return list_users(db, page=page, limit=limit, search=search, user_filter=filter)
+
+
+@router.get("/users/{user_id}", response_model=AdminUserDetail)
+def user_detail(user_id: UUID, db: Session = Depends(get_db)):
+    return get_user_detail(db, user_id)
+
+
+# Locks the user out, hides their listings and services and holds their payouts
+@router.post("/users/{user_id}/suspend", response_model=AdminUserDetail)
+def suspend(
+    user_id: UUID,
+    data: SuspendRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return suspend_user(db, user_id, admin.id, data.reason, data.note, data.notify)
+
+
+@router.post("/users/{user_id}/unsuspend", response_model=AdminUserDetail)
+def unsuspend(
+    user_id: UUID,
+    data: UnsuspendRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return unsuspend_user(db, user_id, admin.id, data.note, data.notify)
+
+
+# ---------- Listings & services ----------
+
+@router.get("/listings", response_model=PaginatedAdminListings)
+def listings(
+    kind: ListingKind = "item",
+    page: int = Query(1, ge=1),
+    limit: int = Query(25, ge=1, le=100),
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    category_id: Optional[UUID] = None,
+    seller_id: Optional[UUID] = None,
+    db: Session = Depends(get_db),
+):
+    return list_listings(db, kind, page=page, limit=limit, search=search, status_filter=status,
+                         category_id=category_id, seller_id=seller_id)
+
+
+@router.get("/listings/{kind}/{item_id}", response_model=AdminListingDetail)
+def listing_detail(kind: ListingKind, item_id: UUID, db: Session = Depends(get_db)):
+    return get_listing_detail(db, kind, item_id)
+
+
+# Hides it from the public and locks it for the seller (who is told why)
+@router.post("/listings/{kind}/{item_id}/remove", response_model=AdminListingDetail)
+def remove(
+    kind: ListingKind,
+    item_id: UUID,
+    data: RemoveListingRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return remove_listing(db, kind, item_id, admin.id, data.reason, data.notify)
+
+
+@router.post("/listings/{kind}/{item_id}/restore", response_model=AdminListingDetail)
+def restore(
+    kind: ListingKind,
+    item_id: UUID,
+    data: RestoreListingRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return restore_listing(db, kind, item_id, admin.id, data.notify)
+
+
+# ---------- Categories ----------
+
+@router.get("/categories", response_model=List[AdminCategory])
+def categories(db: Session = Depends(get_db)):
+    return list_categories(db)
+
+
+@router.post("/categories", response_model=AdminCategory, status_code=201)
+def add_category(data: CategoryCreate, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    return create_category(db, admin.id, data.name, data.type, data.icon)
+
+
+# Every category of one type, in the new order
+@router.post("/categories/reorder", response_model=List[AdminCategory])
+def reorder(data: CategoryReorder, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    return reorder_categories(db, admin.id, data.type, data.ids)
+
+
+@router.patch("/categories/{category_id}", response_model=AdminCategory)
+def edit_category(
+    category_id: UUID,
+    data: CategoryUpdate,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return update_category(db, admin.id, category_id, data.model_dump(exclude_unset=True))
+
+
+# Only for categories nothing uses; others are retired instead
+@router.delete("/categories/{category_id}", status_code=204)
+def remove_category(category_id: UUID, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    delete_category(db, admin.id, category_id)

@@ -2,6 +2,7 @@
 from sqlalchemy.orm import Session, joinedload
 from app.models.listing import Listing, ListingStatus
 from app.models.service import Service, ServiceStatus
+from app.services.suspension import publicly_visible
 from app.utils.geo import distance_km, within_radius, attach_distances
 
 def _get_featured(db: Session, model, active_status, limit: int,
@@ -11,7 +12,7 @@ def _get_featured(db: Session, model, active_status, limit: int,
     query = (
         db.query(model)
         .options(joinedload(model.owner))
-        .filter(model.status == active_status)
+        .filter(model.status == active_status, publicly_visible(model))
     )
 
     if latitude is None or longitude is None:
@@ -46,8 +47,10 @@ def get_featured_services(db: Session, limit: int = 6, **location):
     return _get_featured(db, Service, ServiceStatus.active, limit, **location)
 
 def get_platform_stats(db: Session):
-    active_listings = db.query(Listing).filter(Listing.status == ListingStatus.active).count()
-    active_services = db.query(Service).filter(Service.status == ServiceStatus.active).count()
+    active_listings = db.query(Listing).filter(
+        Listing.status == ListingStatus.active, publicly_visible(Listing)).count()
+    active_services = db.query(Service).filter(
+        Service.status == ServiceStatus.active, publicly_visible(Service)).count()
     from app.models.user import User
     total_users = db.query(User).count()
     return {

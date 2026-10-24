@@ -8,6 +8,7 @@ from app.models.booking import Booking, BookingStatus
 from app.models.service import Service
 from app.models.notification import NotificationType
 from datetime import datetime, timedelta
+from app.services.suspension import owner_not_suspended
 from app.services.payment_service import send_payout, check_seller_payout_eligibility
 from app.services.notification_service import create_notification
 from app.services.email_service import send_payout_scheduled_email, send_bank_account_needed_email
@@ -132,7 +133,9 @@ async def process_due_payouts():
         due_orders = db.query(Order).filter(
             Order.payout_due_at.isnot(None),
             Order.payout_due_at <= now,
-            Order.status == OrderStatus.completed
+            Order.status == OrderStatus.completed,
+            # Held while the seller is suspended
+            owner_not_suspended(Order.seller_id),
         ).all()
 
         for order_id in [order.id for order in due_orders]:

@@ -3,6 +3,7 @@ from typing import Optional
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
+from app.services.suspension import publicly_visible
 from app.models.listing import Listing, ListingStatus
 from app.schemas.listing import ListingCreate, ListingUpdate
 from app.utils.geo import distance_km, within_radius, attach_distances
@@ -53,7 +54,7 @@ def get_listings(db: Session, category: str = None, location: str = None,
     query = (
         db.query(Listing)
         .options(joinedload(Listing.category_ref))
-        .filter(Listing.status == ListingStatus.active)
+        .filter(Listing.status == ListingStatus.active, publicly_visible(Listing))
     )
 
     if category:
@@ -153,10 +154,16 @@ def update_listing(db: Session, listing_id: UUID, listing_data: ListingUpdate, u
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to update this listing"
         )
+    if listing.removed_at:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This listing was removed by Junction and can't be edited."
+        )
 
     update_data = listing_data.model_dump(exclude_unset=True)
 
-    if "category_id" in update_data:
+    # Keeping a retired category is fine; only a change has to pick an active one
+    if "category_id" in update_data and update_data["category_id"] != listing.category_id:
         from app.models.category import Category, CategoryType
         category = db.query(Category).filter(
             Category.id == update_data["category_id"],

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Float, DateTime, Boolean, text
+from sqlalchemy import Column, String, Text, Float, DateTime, Boolean, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 from datetime import datetime
@@ -25,3 +25,11 @@ class User(Base):
 
     # Grants the admin dashboard and critical error alert emails
     is_admin = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    # Suspension: locked out, listings and services hidden, payouts held. Nothing is deleted.
+    is_suspended = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    suspended_at = Column(DateTime, nullable=True)
+    suspended_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Shown to the user (login message and email)
+    suspension_reason = Column(String, nullable=True)
+    # Admins only
+    suspension_note = Column(Text, nullable=True)

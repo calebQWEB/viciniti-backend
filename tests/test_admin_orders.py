@@ -134,8 +134,8 @@ def test_overview_numbers(client, admin_headers):
     assert body["all_time"] == {"sales": 65000.0, "fees": 2400.0, "payouts_sent": 19200.0}
     assert body["last_30d"] == body["all_time"]
     assert body["payouts_owed"] == 38400.0
-    assert body["attention"] == {"failing_payouts": 1, "blocked_payouts": 1, "refunds": 1, "disputes": 0,
-                                 "critical_logs": 1}
+    assert body["attention"] == {"failing_payouts": 1, "blocked_payouts": 1, "held_payouts": 0, "refunds": 1,
+                                 "disputes": 0, "critical_logs": 1}
     assert len(body["daily"]) == 30
     assert body["daily"][-1]["orders"] == 4 and body["daily"][-1]["value"] == 65000.0
 
@@ -154,7 +154,8 @@ def test_queues_follow_their_rules(client, admin_headers):
     })
 
     body = client.get(f"{ORDERS}/queues", headers=admin_headers).json()
-    assert body["counts"] == {"failing_payouts": 1, "blocked_payouts": 1, "refunds": 1, "disputes": 1}
+    assert body["counts"] == {"failing_payouts": 1, "blocked_payouts": 1, "held_payouts": 0, "refunds": 1,
+                              "disputes": 1}
     [item] = body["failing_payouts"]
     assert item["id"] == failing and item["payout_attempts"] == 2
     assert item["payout_last_error"] == "Please enable IP Whitelisting"

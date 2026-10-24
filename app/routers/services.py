@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.service import ServiceCreate, ServiceUpdate, ServiceResponse
@@ -8,6 +8,7 @@ from app.services.service_service import (
 )
 from app.utils.security import get_current_user, get_optional_user
 from app.utils.geo import mark_owner_view
+from app.services.suspension import is_unavailable
 from typing import List, Literal, Optional
 from uuid import UUID
 
@@ -72,6 +73,8 @@ def get_one(
     db: Session = Depends(get_db),
 ):
     service = get_service(db, service_id)
+    if is_unavailable(db, service):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This service is no longer available")
     # Owners (e.g. the edit page) get exact coordinates; everyone else gets blurred ones
     if current_user and str(service.user_id) == current_user.get("sub"):
         mark_owner_view(service)

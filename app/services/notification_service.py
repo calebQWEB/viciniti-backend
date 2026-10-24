@@ -12,6 +12,8 @@ def create_notification(
         message: str,
         type: Optional[NotificationType] = None,
         link: Optional[str] = None,
+        # False when the caller sends its own, more specific email
+        email: bool = True,
 ):
     notification = Notification(
         user_id=UUID(str(user_id)),
@@ -23,7 +25,7 @@ def create_notification(
     db.commit()
     db.refresh(notification)
 
-    user = db.query(User).filter(User.id == UUID(str(user_id))).first()
+    user = db.query(User).filter(User.id == UUID(str(user_id))).first() if email else None
     if user:
         send_notification_email(
             to=user.email,

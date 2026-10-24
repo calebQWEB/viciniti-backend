@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.listing import ListingCreate, ListingUpdate, ListingResponse
@@ -8,6 +8,7 @@ from app.services.listing_service import (
 )
 from app.utils.security import get_current_user, get_optional_user
 from app.utils.geo import mark_owner_view
+from app.services.suspension import is_unavailable
 from typing import List, Literal, Optional
 from uuid import UUID
 
@@ -72,6 +73,8 @@ def get_one(
     db: Session = Depends(get_db),
 ):
     listing = get_listing(db, listing_id)
+    if is_unavailable(db, listing):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This listing is no longer available")
     # Owners (e.g. the edit page) get exact coordinates; everyone else gets blurred ones
     if current_user and str(listing.user_id) == current_user.get("sub"):
         mark_owner_view(listing)

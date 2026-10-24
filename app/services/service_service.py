@@ -2,6 +2,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from sqlalchemy.orm import joinedload
+from app.services.suspension import publicly_visible
 from app.models.service import Service, ServiceStatus
 from app.schemas.service import ServiceCreate, ServiceUpdate
 from app.utils.geo import distance_km, within_radius, attach_distances
@@ -52,7 +53,7 @@ def get_services(db: Session, category: str = None, location: str = None,
     query = (
         db.query(Service)
         .options(joinedload(Service.category_ref))
-        .filter(Service.status == ServiceStatus.active)
+        .filter(Service.status == ServiceStatus.active, publicly_visible(Service))
     )
 
     if category:
@@ -154,10 +155,16 @@ def update_service(db: Session, service_id: UUID, service_data: ServiceUpdate, u
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to update this service"
         )
+    if service.removed_at:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This service was removed by Junction and can't be edited."
+        )
 
     update_data = service_data.model_dump(exclude_unset=True)
 
-    if "category_id" in update_data:
+    # Keeping a retired category is fine; only a change has to pick an active one
+    if "category_id" in update_data and update_data["category_id"] != service.category_id:
         from app.models.category import Category, CategoryType
         category = db.query(Category).filter(
             Category.id == update_data["category_id"],

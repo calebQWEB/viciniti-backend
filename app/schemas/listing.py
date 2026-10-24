@@ -48,6 +48,9 @@ class ListingResponse(ListingBase):
     images: List[ImageObject]
     status: ListingStatus
     created_at: datetime
+    # Set when an admin removed it; only the seller ever sees these (removed items are hidden from everyone else)
+    removed_at: Optional[datetime] = None
+    removal_reason: Optional[str] = None
     category: Optional[CategorySummary] = Field(None, alias="category_ref")
     # Only set when the request included a location
     distance_km: Optional[float] = None

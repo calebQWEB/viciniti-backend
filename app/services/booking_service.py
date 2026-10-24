@@ -11,12 +11,13 @@ from app.models.order import Order, OrderStatus
 from app.services.notification_service import create_notification
 from app.config import calculate_platform_fee
 from app.services.log_service import log_event
+from app.services.suspension import is_unavailable
 from uuid import UUID
 
 def create_booking(db: Session, booking_data: BookingCreate, client_id: UUID):
     # Get the service
     service = db.query(Service).filter(Service.id == booking_data.service_id).first()
-    if not service:
+    if not service or is_unavailable(db, service):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Service not found"

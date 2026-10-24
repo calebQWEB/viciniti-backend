@@ -5,7 +5,7 @@ from uuid import UUID
 
 from app.schemas.app_log import LogListItem, LogUser
 
-OrderQueue = Literal["failing_payouts", "blocked_payouts", "refunds", "disputes"]
+OrderQueue = Literal["failing_payouts", "blocked_payouts", "held_payouts", "refunds", "disputes"]
 
 
 # ---------- Overview ----------
@@ -80,6 +80,7 @@ class PaginatedAdminOrders(BaseModel):
 class OrderQueues(BaseModel):
     failing_payouts: List[AdminOrderItem]
     blocked_payouts: List[AdminOrderItem]
+    held_payouts: List[AdminOrderItem]
     refunds: List[AdminOrderItem]
     disputes: List[AdminOrderItem]
     counts: Dict[str, int]
@@ -149,3 +150,158 @@ class RetryAllResult(BaseModel):
 class MarkRefundedRequest(BaseModel):
     reference: Optional[str] = Field(default=None, max_length=100)
     note: Optional[str] = Field(default=None, max_length=2000)
+
+
+# ---------- Users ----------
+
+UserFilter = Literal["all", "suspended", "admins", "new"]
+
+
+class AdminUserItem(BaseModel):
+    id: UUID
+    name: str
+    email: str
+    avatar: Optional[str] = None
+    location: Optional[str] = None
+    intent: Optional[str] = None
+    created_at: Optional[datetime] = None
+    is_admin: bool
+    is_suspended: bool
+    suspended_at: Optional[datetime] = None
+    listings_count: int = 0
+    services_count: int = 0
+    orders_count: int = 0
+
+
+class PaginatedAdminUsers(BaseModel):
+    items: List[AdminUserItem]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
+class OrderSideTotals(BaseModel):
+    count: int
+    # Value of orders where the money was taken (paid onwards, not cancelled)
+    value: float
+
+
+class AdminUserDetail(AdminUserItem):
+    onboarded_at: Optional[datetime] = None
+    suspension_reason: Optional[str] = None
+    suspension_note: Optional[str] = None
+    suspended_by: Optional[LogUser] = None
+    bank: Optional[SellerBank] = None
+    listings_by_status: Dict[str, int]
+    services_by_status: Dict[str, int]
+    as_buyer: OrderSideTotals
+    as_seller: OrderSideTotals
+    disputes: int
+    rating_average: Optional[float] = None
+    rating_count: int = 0
+    recent_orders: List[AdminOrderItem]
+    logs: List[LogListItem]
+
+
+class SuspendRequest(BaseModel):
+    # Shown to the user on the login page and in the email
+    reason: str = Field(min_length=3, max_length=500)
+    # Admins only
+    note: Optional[str] = Field(default=None, max_length=2000)
+    notify: bool = True
+
+
+class UnsuspendRequest(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=2000)
+    notify: bool = True
+
+
+# ---------- Listings & services ----------
+
+ListingKind = Literal["item", "service"]
+
+
+class ListingCategory(BaseModel):
+    id: UUID
+    name: str
+    slug: str
+
+
+class AdminListingItem(BaseModel):
+    id: UUID
+    kind: ListingKind
+    title: str
+    price: float
+    # The seller's own status: active/sold for items, active/inactive for services
+    status: str
+    thumbnail: Optional[str] = None
+    location: Optional[str] = None
+    category: Optional[ListingCategory] = None
+    seller: LogUser
+    seller_suspended: bool = False
+    created_at: Optional[datetime] = None
+    removed_at: Optional[datetime] = None
+    removal_reason: Optional[str] = None
+
+
+class PaginatedAdminListings(BaseModel):
+    items: List[AdminListingItem]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
+class AdminListingDetail(AdminListingItem):
+    description: str
+    images: List[str]
+    removed_by: Optional[LogUser] = None
+    # Orders for an item; bookings for a service
+    orders_count: int
+
+
+class RemoveListingRequest(BaseModel):
+    # Shown to the seller
+    reason: str = Field(min_length=3, max_length=500)
+    notify: bool = True
+
+
+class RestoreListingRequest(BaseModel):
+    notify: bool = True
+
+
+# ---------- Categories ----------
+
+# Lucide icon names are kebab-case, e.g. "shopping-bag"
+ICON_PATTERN = r"^[a-z0-9]+(-[a-z0-9]+)*$"
+
+
+class AdminCategory(BaseModel):
+    id: UUID
+    name: str
+    slug: str
+    type: ListingKind
+    icon: Optional[str] = None
+    sort_order: int
+    is_active: bool
+    # Listings or services filed under it
+    usage_count: int
+
+
+class CategoryCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=60)
+    type: ListingKind
+    icon: Optional[str] = Field(default=None, max_length=50, pattern=ICON_PATTERN)
+
+
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=60)
+    icon: Optional[str] = Field(default=None, max_length=50, pattern=ICON_PATTERN)
+    is_active: Optional[bool] = None
+
+
+class CategoryReorder(BaseModel):
+    type: ListingKind
+    # Every category of that type, in the new order
+    ids: List[UUID]

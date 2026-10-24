@@ -48,6 +48,12 @@ def forgot_password(
     if not user.password_hash:
         return {"message": "If that email exists, a reset link has been sent."}
 
+    # A reset link must not become a way back into a suspended account
+    if user.is_suspended:
+        log_event("warning", "auth", "auth.reset_suspended", "Suspended account asked for a password reset",
+                  user_id=user.id)
+        return {"message": "If that email exists, a reset link has been sent."}
+
     # Invalidate any existing unused tokens for this user
     db.query(PasswordResetToken).filter(
         PasswordResetToken.user_id == user.id,

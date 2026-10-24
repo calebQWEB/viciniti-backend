@@ -6,6 +6,7 @@ from app.utils.security import hash_password, verify_password, create_access_tok
 from app.services.email_service import send_welcome_email, send_password_reset_email, send_new_message_email
 from datetime import timedelta
 from app.config import get_settings
+from app.services.suspension import suspended_error
 from app.services.log_service import log_event, mask_email
 
 settings = get_settings()
@@ -57,6 +58,11 @@ def login_user(db: Session, email: str, password: str):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+
+    # Checked only after the password matches, so guessers don't learn the account is suspended
+    if user.is_suspended:
+        log_event("warning", "auth", "auth.login_suspended", "Suspended account tried to log in", user_id=user.id)
+        raise suspended_error(user.suspension_reason)
 
     # Generate JWT token
     access_token = create_access_token(

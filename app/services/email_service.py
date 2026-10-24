@@ -373,3 +373,86 @@ def send_bank_account_needed_email(to: str, name: str, amount: float, order_id: 
         </div>
         """
     )
+
+def send_account_suspended_email(to: str, name: str, reason: str) -> bool:
+    """The reason is admin-written, so it's escaped like any other text."""
+    return send_email(
+        to=to,
+        subject=f"Your {BRAND_NAME} account has been suspended",
+        html=f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <h2 style="color: #111; font-size: 22px;">Hi {escape(name)},</h2>
+            <p style="color: #555; line-height: 1.6;">
+                Your {BRAND_NAME} account has been suspended. While it's suspended you can't sign in,
+                your listings and services are hidden, and payouts are on hold.
+            </p>
+            <div style="background: #f9f9f9; border-radius: 12px; padding: 20px; margin: 16px 0;">
+                <p style="color: #333; font-weight: 700; margin: 0 0 8px;">Reason</p>
+                <p style="color: #555; margin: 0; white-space: pre-line;">{escape(reason)}</p>
+            </div>
+            <p style="color: #555; line-height: 1.6;">
+                If you think this is a mistake, reply to this email and we'll take another look.
+            </p>
+        </div>
+        """,
+    )
+
+
+def send_account_reinstated_email(to: str, name: str) -> bool:
+    return send_email(
+        to=to,
+        subject=f"Your {BRAND_NAME} account is active again",
+        html=f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <h2 style="color: #111; font-size: 22px;">Hi {escape(name)},</h2>
+            <p style="color: #555; line-height: 1.6;">
+                Your {BRAND_NAME} account is active again. You can sign in, your listings and services are
+                visible, and any payouts that were on hold will go out as normal.
+            </p>
+            <a href="{settings.FRONTEND_URL}/login"
+               style="display: inline-block; background: #2D6A4F; color: white; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; margin: 24px 0;">
+                Sign in
+            </a>
+        </div>
+        """,
+    )
+
+
+def send_listing_removed_email(to: str, name: str, kind: str, title: str, reason: str) -> bool:
+    """kind is "listing" or "service". Title and reason are user/admin text, so escaped."""
+    return send_email(
+        to=to,
+        subject=f"Your {kind} was removed from {BRAND_NAME}",
+        html=f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <h2 style="color: #111; font-size: 22px;">Hi {escape(name)},</h2>
+            <p style="color: #555; line-height: 1.6;">
+                We've removed your {kind} <b>{escape(title)}</b> from {BRAND_NAME}. It's no longer visible to
+                other people and can't be edited, but you can still see it in your dashboard.
+            </p>
+            <div style="background: #f9f9f9; border-radius: 12px; padding: 20px; margin: 16px 0;">
+                <p style="color: #333; font-weight: 700; margin: 0 0 8px;">Reason</p>
+                <p style="color: #555; margin: 0; white-space: pre-line;">{escape(reason)}</p>
+            </div>
+            <p style="color: #555; line-height: 1.6;">
+                If you think this is a mistake, reply to this email and we'll take another look.
+            </p>
+        </div>
+        """,
+    )
+
+
+def send_listing_restored_email(to: str, name: str, kind: str, title: str) -> bool:
+    return send_email(
+        to=to,
+        subject=f"Your {kind} is back on {BRAND_NAME}",
+        html=f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <h2 style="color: #111; font-size: 22px;">Hi {escape(name)},</h2>
+            <p style="color: #555; line-height: 1.6;">
+                Your {kind} <b>{escape(title)}</b> has been restored. People nearby can see it again, and you can
+                edit it as normal.
+            </p>
+        </div>
+        """,
+    )

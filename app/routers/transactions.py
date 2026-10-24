@@ -24,6 +24,7 @@ import json
 import logging
 import traceback
 
+from app.services.suspension import is_user_suspended
 from app.services.log_service import log_event
 
 logger = logging.getLogger("junction")
@@ -176,7 +177,12 @@ async def initiate(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found"
         )
-    if order.status != OrderStatus.pending:
+    item = order.listing if order.listing_id else order.service
+    if (
+        order.status != OrderStatus.pending
+        or is_user_suspended(db, order.seller_id)
+        or (item is not None and item.removed_at is not None)
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This order can no longer be paid for."

@@ -46,14 +46,29 @@ def get_optional_user(token: Optional[str] = Depends(optional_oauth2_scheme)):
     """The token payload for a logged-in request, or None (also for invalid tokens)."""
     return decode_access_token(token) if token else None
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """The token payload. The account is checked on every request, so a suspension ends open sessions at once."""
+    from app.models.user import User
+    from app.services.suspension import suspended_error
+
     payload = decode_access_token(token)
+    invalid = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise invalid
+    try:
+        user_id = UUID(str(payload.get("sub")))
+    except ValueError:
+        raise invalid
+
+    account = db.query(User.is_suspended, User.suspension_reason).filter(User.id == user_id).first()
+    if account is None:
+        raise invalid
+    if account.is_suspended:
+        raise suspended_error(account.suspension_reason)
     return payload
 
 def require_admin(

@@ -14,10 +14,17 @@ from pydantic import BaseModel
 from typing import List
 from app.utils.security import get_current_user, verify_password, hash_password
 from app.services.log_service import log_event
+from app.services.suspension import is_user_suspended
 from uuid import UUID
 from datetime import datetime
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+
+def _not_suspended(db: Session, user_id: UUID):
+    """Suspended users' public pages look the same as missing ones."""
+    if is_user_suspended(db, user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
 # Get current logged in user profile
 @router.get("/me", response_model=UserResponse)
@@ -34,7 +41,7 @@ def get_me(current_user: dict = Depends(get_current_user), db: Session = Depends
 @router.get("/{user_id}", response_model=PublicUserResponse)
 def get_user(user_id: UUID, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
-    if not user:
+    if not user or user.is_suspended:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
@@ -133,16 +140,19 @@ class UserStatsResponse(BaseModel):
 
 @router.get("/{user_id}/stats", response_model=UserStatsResponse)
 def get_user_stats(user_id: UUID, db: Session = Depends(get_db)):
+    _not_suspended(db, user_id)
     # Get active listings
     listings = db.query(Listing).filter(
         Listing.user_id == user_id,
-        Listing.status == ListingStatus.active
+        Listing.status == ListingStatus.active,
+        Listing.removed_at.is_(None),
     ).all()
 
     # Get active services
     services = db.query(Service).filter(
         Service.user_id == user_id,
-        Service.status == ServiceStatus.active
+        Service.status == ServiceStatus.active,
+        Service.removed_at.is_(None),
     ).all()
 
     # Count completed orders as seller
@@ -164,4 +174,5 @@ def get_reviews(
     db: Session = Depends(get_db)
 ):
     from app.services.review_service import get_seller_reviews
+    _not_suspended(db, user_id)
     return get_seller_reviews(db, user_id)

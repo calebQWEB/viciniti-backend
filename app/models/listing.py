@@ -30,5 +30,11 @@ class Listing(Base):
     category_id = Column(UUID(as_uuid=True), ForeignKey("categories.id"), nullable=True)
     category_ref = relationship("Category", backref="listings")
 
+    # Removed by an admin: hidden from the public, locked for the seller. Status is left as the seller set it.
+    removed_at = Column(DateTime, nullable=True)
+    removed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Shown to the seller
+    removal_reason = Column(String, nullable=True)
+
     # Relationship
-    owner = relationship("User", backref="listings")
+    owner = relationship("User", foreign_keys=[user_id], backref="listings")
